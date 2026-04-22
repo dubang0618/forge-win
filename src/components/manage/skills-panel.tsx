@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Search, FilePlus, FolderPlus, ChevronRight, ChevronDown,
-  Folder, FileText, Copy, Scissors, ClipboardPaste, Pencil, Trash2,
+  Folder, FileText, Copy, Scissors, ClipboardPaste, Pencil, Trash2, Link,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useI18n } from '@/components/providers/i18n-provider'
@@ -15,6 +15,7 @@ interface SkillTreeNode {
   path: string
   children?: SkillTreeNode[]
   enabled?: boolean
+  isSymlink?: boolean
 }
 
 interface ContextMenuState {
@@ -134,11 +135,23 @@ export function SkillsPanel({ onSelectFile, selectedPath }: SkillsPanelProps) {
 
   const handleDelete = useCallback(async (relPath: string) => {
     try {
-      await fetch(`/api/workspaces/${workspaceId}/fs?path=${encodeURIComponent(`skills/${relPath}`)}`, {
+      console.log('[SkillsPanel] Deleting:', { relPath, workspaceId })
+      const res = await fetch(`/api/workspaces/${workspaceId}/fs?path=${encodeURIComponent(`skills/${relPath}`)}`, {
         method: 'DELETE',
       })
-      fetchTree()
-    } catch { /* ignore */ }
+      if (!res.ok) {
+        const error = await res.text()
+        console.error('[SkillsPanel] Delete failed:', error)
+        return
+      }
+      console.log('[SkillsPanel] Delete successful, refreshing tree')
+      // Add delay to avoid race conditions with file watcher
+      await new Promise(resolve => setTimeout(resolve, 100))
+      await fetchTree()
+      console.log('[SkillsPanel] Tree refreshed')
+    } catch (err) {
+      console.error('[SkillsPanel] Delete error:', err)
+    }
   }, [workspaceId, fetchTree])
 
   // ── Clipboard: Copy / Cut / Paste ──
@@ -161,12 +174,15 @@ export function SkillsPanel({ onSelectFile, selectedPath }: SkillsPanelProps) {
     setTree(prev => insertSkillNodesIntoTree(prev, parentPath, newNodes))
   }, [])
 
+  const shortcutLabel = window.electronAPI?.platform === 'darwin' ? '⌘' : 'Ctrl+'
+
   const handlePaste = useCallback(async (targetFolder: string) => {
     // Internal clipboard paste
     if (clipboardState) {
       const action = clipboardState.action === 'cut' ? 'move' : 'copy'
+      console.log('[skills-panel] internal paste start', { action, source: clipboardState.path, targetFolder })
       try {
-        await fetch(`/api/workspaces/${workspaceId}/fs`, {
+        const res = await fetch(`/api/workspaces/${workspaceId}/fs`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -175,17 +191,21 @@ export function SkillsPanel({ onSelectFile, selectedPath }: SkillsPanelProps) {
             action,
           }),
         })
+        console.log('[skills-panel] internal paste response', { ok: res.ok, status: res.status })
         if (clipboardState.action === 'cut') setClipboardState(null)
         fetchTree()
-      } catch { /* ignore */ }
+      } catch (error) {
+        console.error('[skills-panel] internal paste failed', error)
+      }
       return
     }
 
-    // OS clipboard paste (files from Finder)
+    // OS clipboard paste
     const api = window.electronAPI
     if (api?.readClipboardFiles) {
       try {
         const files = await api.readClipboardFiles()
+        console.log('[skills-panel] clipboard files', { targetFolder, files })
         if (files.length > 0) {
           // Optimistic: add placeholder nodes immediately
           const names = files.map(f => f.split('/').pop()!).filter(Boolean)
@@ -199,12 +219,18 @@ export function SkillsPanel({ onSelectFile, selectedPath }: SkillsPanelProps) {
               destinationFolder: targetFolder ? `skills/${targetFolder}` : 'skills',
             }),
           })
-          fetchTree() // always refresh to get real state
-          if (!res.ok) console.warn('Import failed:', await res.text())
+          console.log('[skills-panel] import response', { ok: res.ok, status: res.status })
+          fetchTree()
+          if (!res.ok) console.warn('[skills-panel] import failed body:', await res.text())
+        } else {
+          console.warn('[skills-panel] no clipboard files returned')
         }
-      } catch {
-        fetchTree() // revert optimistic on error
+      } catch (error) {
+        console.error('[skills-panel] clipboard paste failed', error)
+        fetchTree()
       }
+    } else {
+      console.warn('[skills-panel] electron clipboard API unavailable')
     }
   }, [clipboardState, workspaceId, fetchTree, addOptimisticNodes])
 
@@ -220,7 +246,7 @@ export function SkillsPanel({ onSelectFile, selectedPath }: SkillsPanelProps) {
 
       const isMod = e.metaKey || e.ctrlKey
 
-      // ⌘V paste: works even without selection (paste to root)
+      // Paste: works even without selection (paste to root)
       if (isMod && e.key === 'v') {
         e.preventDefault()
         const targetFolder = !selectedNode ? ''
@@ -361,7 +387,7 @@ export function SkillsPanel({ onSelectFile, selectedPath }: SkillsPanelProps) {
         return
       }
 
-      // External file drop from Finder
+      // External file drop from OS
       const files = e.dataTransfer?.files
       if (files && files.length > 0) {
         const sourcePaths: string[] = []
@@ -483,10 +509,32 @@ export function SkillsPanel({ onSelectFile, selectedPath }: SkillsPanelProps) {
           />
         )}
         {filteredTree.length === 0 && !creating && (
-          <div className="px-3 py-6 text-center">
-            <span className="text-[12px] text-muted">
-              {search ? t('skills.noMatchingSkills') : t('skills.noSkillsYet')}
-            </span>
+          <div
+            className="px-3 py-8"
+            onContextMenu={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setContextMenu({ x: e.clientX, y: e.clientY, targetPath: '', targetType: 'root' })
+            }}
+          >
+            <div className="flex flex-col items-center text-center gap-3">
+              <span className="text-[12px] text-muted">
+                {search ? t('skills.noMatchingSkills') : t('skills.noSkillsYet')}
+              </span>
+              {!search && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => void handlePaste('')}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-[12px] font-medium text-primary bg-elevated hover:bg-surface-hover transition-colors"
+                  >
+                    <ClipboardPaste size={12} className="text-tertiary" />
+                    <span>{t('contextMenu.paste')}</span>
+                  </button>
+                  <p className="text-[10px] text-muted">{shortcutLabel}V</p>
+                </>
+              )}
+            </div>
           </div>
         )}
         {filteredTree.map(node => (
@@ -542,6 +590,13 @@ export function SkillsPanel({ onSelectFile, selectedPath }: SkillsPanelProps) {
               >
                 <FolderPlus size={12} className="text-tertiary" /> {t('button.newFolder')}
               </button>
+              <button
+                onClick={() => { handlePaste(contextMenu.targetPath); setContextMenu(null) }}
+                className="flex items-center justify-between w-full px-3 py-1.5 text-[12px] text-primary hover:bg-surface-hover transition-colors"
+              >
+                <span className="flex items-center gap-2"><ClipboardPaste size={12} className="text-tertiary" /> {t('contextMenu.paste')}</span>
+                <span className="text-[10px] text-muted">{shortcutLabel}V</span>
+              </button>
               <div className="h-px bg-subtle mx-2 my-1" />
             </>
           )}
@@ -553,14 +608,14 @@ export function SkillsPanel({ onSelectFile, selectedPath }: SkillsPanelProps) {
                 className="flex items-center justify-between w-full px-3 py-1.5 text-[12px] text-primary hover:bg-surface-hover transition-colors"
               >
                 <span className="flex items-center gap-2"><Copy size={12} className="text-tertiary" /> {t('contextMenu.copy')}</span>
-                <span className="text-[10px] text-muted">⌘C</span>
+                <span className="text-[10px] text-muted">{shortcutLabel}C</span>
               </button>
               <button
                 onClick={() => { handleCut(contextMenu.targetPath); setContextMenu(null) }}
                 className="flex items-center justify-between w-full px-3 py-1.5 text-[12px] text-primary hover:bg-surface-hover transition-colors"
               >
                 <span className="flex items-center gap-2"><Scissors size={12} className="text-tertiary" /> {t('contextMenu.cut')}</span>
-                <span className="text-[10px] text-muted">⌘X</span>
+                <span className="text-[10px] text-muted">{shortcutLabel}X</span>
               </button>
               <button
                 onClick={() => {
@@ -570,11 +625,10 @@ export function SkillsPanel({ onSelectFile, selectedPath }: SkillsPanelProps) {
                   handlePaste(target)
                   setContextMenu(null)
                 }}
-                disabled={!clipboardState}
-                className="flex items-center justify-between w-full px-3 py-1.5 text-[12px] text-primary hover:bg-surface-hover transition-colors disabled:opacity-40"
+                className="flex items-center justify-between w-full px-3 py-1.5 text-[12px] text-primary hover:bg-surface-hover transition-colors"
               >
                 <span className="flex items-center gap-2"><ClipboardPaste size={12} className="text-tertiary" /> {t('contextMenu.paste')}</span>
-                <span className="text-[10px] text-muted">⌘V</span>
+                <span className="text-[10px] text-muted">{shortcutLabel}V</span>
               </button>
               <div className="h-px bg-subtle mx-2 my-1" />
               <button
@@ -622,7 +676,7 @@ function SkillTreeItem({
   onDragStart: (e: React.DragEvent, path: string) => void
   onDragEnd: () => void
 }) {
-  const [expanded, setExpanded] = useState(depth < 2)
+  const [expanded, setExpanded] = useState(false)
   const isFolder = node.type === 'folder'
   const isSelected = selectedPath === node.path
   const isRenaming = renaming?.path === node.path
@@ -662,11 +716,17 @@ function SkillTreeItem({
               ? <ChevronDown size={12} className="text-tertiary shrink-0" />
               : <ChevronRight size={12} className="text-tertiary shrink-0" />}
             <Folder size={13} className={cn('shrink-0', isSelected ? 'text-indigo' : 'text-tertiary')} />
+            {node.isSymlink && (
+              <Link size={10} className="text-muted shrink-0 -ml-0.5" />
+            )}
           </>
         ) : (
           <>
             <span className="w-3 shrink-0" />
             <FileText size={13} className="text-tertiary shrink-0" />
+            {node.isSymlink && (
+              <Link size={10} className="text-muted shrink-0 -ml-0.5" />
+            )}
           </>
         )}
         {isRenaming ? (
@@ -687,6 +747,11 @@ function SkillTreeItem({
             isFolder ? 'text-primary font-medium' : 'text-secondary'
           )}>
             {node.name}
+            {isFolder && node.path && (
+              <span className="text-[10px] text-muted ml-1.5 font-normal">
+                {node.path}
+              </span>
+            )}
           </span>
         )}
       </div>

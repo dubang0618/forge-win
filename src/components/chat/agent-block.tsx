@@ -369,7 +369,7 @@ export function AgentBlock({
           {!hintDismissed && (
             <div className="pl-4 pb-1">
               <span className="text-[11px] text-muted italic">
-                Press {typeof navigator !== 'undefined' && navigator.platform?.includes('Mac') ? '⌘E' : 'Ctrl+E'} to expand agent context
+                Press {window.electronAPI?.platform === 'darwin' ? '⌘E' : 'Ctrl+E'} to expand agent context
               </span>
             </div>
           )}

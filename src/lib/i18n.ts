@@ -287,7 +287,7 @@ const translations: Record<Locale, Record<string, string>> = {
     'action.viewFileContent': '查看文件内容',
 
     // Hints
-    'hint.cmdSToSave': 'Cmd+S 保存',
+    'hint.cmdSToSave': 'Ctrl+S 保存',
 
     // Info
     'info.addedByUser': '添加者：用户',
@@ -837,7 +837,7 @@ const translations: Record<Locale, Record<string, string>> = {
     'action.viewFileContent': 'View file content',
 
     // Hints
-    'hint.cmdSToSave': 'Cmd+S to save',
+    'hint.cmdSToSave': 'Ctrl+S to save',
 
     // Info
     'info.addedByUser': 'Added by: User',

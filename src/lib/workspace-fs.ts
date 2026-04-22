@@ -114,17 +114,34 @@ export function renameForgeEntry(workspaceId: string, oldRelPath: string, newRel
 
 /**
  * Delete a file or folder inside .claude/.
+ * Uses a safer deletion approach to avoid crashes on Windows with special characters.
  */
 export function deleteForgeEntry(workspaceId: string, relativePath: string): void {
   if (relativePath.includes('..')) throw new Error('Invalid path')
   const forgePath = getWorkspacePath(workspaceId)
   const fullPath = path.join(forgePath, relativePath)
+  console.log('[deleteForgeEntry]', { workspaceId, relativePath, fullPath, exists: fs.existsSync(fullPath) })
   if (!fs.existsSync(fullPath)) return
   const stat = fs.statSync(fullPath)
-  if (stat.isDirectory()) {
-    fs.rmSync(fullPath, { recursive: true, force: true })
-  } else {
-    fs.unlinkSync(fullPath)
+  console.log('[deleteForgeEntry] Deleting:', { isDirectory: stat.isDirectory(), fullPath })
+  try {
+    if (stat.isDirectory()) {
+      // Check if directory is empty
+      const contents = fs.readdirSync(fullPath)
+      if (contents.length === 0) {
+        // Use rmdirSync for empty directories (more reliable on Windows with Unicode paths)
+        fs.rmdirSync(fullPath)
+      } else {
+        // Use rmSync with options for non-empty directories
+        fs.rmSync(fullPath, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+      }
+    } else {
+      fs.unlinkSync(fullPath)
+    }
+    console.log('[deleteForgeEntry] Deleted successfully:', fullPath)
+  } catch (err) {
+    console.error('[deleteForgeEntry] Failed to delete:', err)
+    throw err
   }
 }
 
@@ -171,17 +188,34 @@ export function renameProjectEntry(workspaceId: string, oldRelPath: string, newR
 
 /**
  * Delete a file or folder relative to the project root directory.
+ * Uses a safer deletion approach to avoid crashes on Windows with special characters.
  */
 export function deleteProjectEntry(workspaceId: string, relativePath: string): void {
   if (relativePath.includes('..')) throw new Error('Invalid path')
   const projectPath = getProjectPath(workspaceId)
   const fullPath = path.join(projectPath, relativePath)
+  console.log('[deleteProjectEntry]', { workspaceId, relativePath, fullPath, exists: fs.existsSync(fullPath) })
   if (!fs.existsSync(fullPath)) return
   const stat = fs.statSync(fullPath)
-  if (stat.isDirectory()) {
-    fs.rmSync(fullPath, { recursive: true, force: true })
-  } else {
-    fs.unlinkSync(fullPath)
+  console.log('[deleteProjectEntry] Deleting:', { isDirectory: stat.isDirectory(), fullPath })
+  try {
+    if (stat.isDirectory()) {
+      // Check if directory is empty
+      const contents = fs.readdirSync(fullPath)
+      if (contents.length === 0) {
+        // Use rmdirSync for empty directories (more reliable on Windows with Unicode paths)
+        fs.rmdirSync(fullPath)
+      } else {
+        // Use rmSync with options for non-empty directories
+        fs.rmSync(fullPath, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+      }
+    } else {
+      fs.unlinkSync(fullPath)
+    }
+    console.log('[deleteProjectEntry] Deleted successfully:', fullPath)
+  } catch (err) {
+    console.error('[deleteProjectEntry] Failed to delete:', err)
+    throw err
   }
 }
 
@@ -301,6 +335,20 @@ export function readWorkspaceFile(workspaceId: string, filename: string): string
   // Guard against path traversal (e.g. ../../etc/passwd)
   if (!filePath.startsWith(basePath + path.sep) && filePath !== basePath) return null
   if (!fs.existsSync(filePath)) return null
+
+  // If it's a directory, try to read SKILL.md or skill.md inside it
+  const stat = fs.statSync(filePath)
+  if (stat.isDirectory()) {
+    const skillMd = path.join(filePath, 'SKILL.md')
+    const skillMdLower = path.join(filePath, 'skill.md')
+    if (fs.existsSync(skillMd)) {
+      return fs.readFileSync(skillMd, 'utf-8')
+    } else if (fs.existsSync(skillMdLower)) {
+      return fs.readFileSync(skillMdLower, 'utf-8')
+    }
+    return null
+  }
+
   return fs.readFileSync(filePath, 'utf-8')
 }
 
@@ -309,7 +357,13 @@ export function writeWorkspaceFile(workspaceId: string, filename: string, conten
   if (!fs.existsSync(forgePath)) {
     ensureWorkspaceDir(workspaceId)
   }
-  const filePath = path.join(forgePath, filename)
+  let filePath = path.join(forgePath, filename)
+
+  // If the target is a directory, write to SKILL.md inside it
+  if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) {
+    filePath = path.join(filePath, 'SKILL.md')
+  }
+
   // Ensure parent directory exists (for nested paths like memory/2024-01-01.md)
   const parentDir = path.dirname(filePath)
   if (!fs.existsSync(parentDir)) {

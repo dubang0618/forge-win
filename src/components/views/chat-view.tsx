@@ -419,6 +419,17 @@ export function ChatView({
     return () => document.removeEventListener('mousedown', handler)
   }, [thinkOpen])
 
+  const appendUploads = useCallback((uploads: Array<{ originalName: string; path: string; filename: string; mimeType: string; tier: string; isImage: boolean }>) => {
+    setAttachments(prev => [...prev, ...uploads.map(data => ({
+      name: data.originalName,
+      path: data.path,
+      filename: data.filename,
+      mimeType: data.mimeType,
+      tier: data.tier,
+      isImage: data.isImage,
+    }))])
+  }, [])
+
   const handleFileUpload = useCallback(async (files: FileList | null) => {
     if (!files) return
     for (const file of Array.from(files)) {
@@ -428,19 +439,43 @@ export function ChatView({
         const res = await fetch('/api/upload', { method: 'POST', body: formData })
         if (!res.ok) continue
         const data = await res.json()
-        setAttachments(prev => [...prev, {
-          name: data.originalName,
-          path: data.path,
-          filename: data.filename,
-          mimeType: data.mimeType,
-          tier: data.tier,
-          isImage: data.isImage,
-        }])
+        appendUploads([data])
       } catch { /* ignore */ }
     }
-    // Reset file input so the same file can be selected again
     if (fileInputRef.current) fileInputRef.current.value = ''
-  }, [])
+  }, [appendUploads])
+
+  const handlePathUpload = useCallback(async (sourcePaths: string[]) => {
+    if (sourcePaths.length === 0) return false
+    try {
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sourcePaths }),
+      })
+      if (!res.ok) return false
+      const data = await res.json()
+      appendUploads(data.uploads || [])
+      return true
+    } catch {
+      return false
+    }
+  }, [appendUploads])
+
+  const handleComposerPaste = useCallback(async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = e.clipboardData?.files
+    if (files && files.length > 0) {
+      e.preventDefault()
+      await handleFileUpload(files)
+      return
+    }
+
+    const sourcePaths = await window.electronAPI?.readClipboardFiles?.()
+    if (sourcePaths && sourcePaths.length > 0) {
+      const uploaded = await handlePathUpload(sourcePaths)
+      if (uploaded) e.preventDefault()
+    }
+  }, [handleFileUpload, handlePathUpload])
 
   const removeAttachment = useCallback((idx: number) => {
     setAttachments(prev => prev.filter((_, i) => i !== idx))
@@ -655,6 +690,7 @@ export function ChatView({
               ref={textareaRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              onPaste={handleComposerPaste}
               placeholder={t('input.reply')}
               rows={1}
               className="w-full bg-transparent text-[13px] text-primary placeholder:text-muted outline-none resize-none leading-relaxed"

@@ -38,7 +38,8 @@ export async function testMcpServer(
           headers,
           signal: AbortSignal.timeout(10000),
         })
-        return (res.ok || res.status === 405) ? 'connected' : 'error'
+        // Accept 2xx, 400 (MCP protocol error), or 405 (method not allowed)
+        return (res.ok || res.status === 400 || res.status === 405) ? 'connected' : 'error'
       }
 
       default:

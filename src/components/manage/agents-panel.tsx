@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Search, FilePlus, ChevronRight, ChevronDown,
-  FileText, Pencil, Trash2,
+  FileText, Pencil, Trash2, ClipboardPaste,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useI18n } from '@/components/providers/i18n-provider'
@@ -22,6 +22,7 @@ interface ContextMenuState {
   y: number
   targetPath: string
   targetSection: 'config' | 'subagent'
+  targetType?: 'root' | 'file'
 }
 
 interface AgentsPanelProps {
@@ -51,6 +52,7 @@ export function AgentsPanel({
   const [creatingConfig, setCreatingConfig] = useState(false)
   const [creatingAgent, setCreatingAgent] = useState(false)
   const [isDraggingExternal, setIsDraggingExternal] = useState(false)
+  const shortcutLabel = window.electronAPI?.platform === 'darwin' ? '⌘' : 'Ctrl+'
   const subAgentsRef = useRef<HTMLDivElement>(null)
 
   const workspaceId = GLOBAL_WORKSPACE_ID
@@ -114,11 +116,23 @@ export function AgentsPanel({
   // Delete an agent file
   const handleDeleteAgent = useCallback(async (relPath: string) => {
     try {
-      await fetch(`/api/workspaces/${workspaceId}/fs?path=${encodeURIComponent(`agents/${relPath}`)}`, {
+      console.log('[AgentsPanel] Deleting:', { relPath, workspaceId })
+      const res = await fetch(`/api/workspaces/${workspaceId}/fs?path=${encodeURIComponent(`agents/${relPath}`)}`, {
         method: 'DELETE',
       })
-      fetchAgentFiles()
-    } catch { /* ignore */ }
+      if (!res.ok) {
+        const error = await res.text()
+        console.error('[AgentsPanel] Delete failed:', error)
+        return
+      }
+      console.log('[AgentsPanel] Delete successful, refreshing tree')
+      // Add delay to avoid race conditions with file watcher
+      await new Promise(resolve => setTimeout(resolve, 100))
+      await fetchAgentFiles()
+      console.log('[AgentsPanel] Tree refreshed')
+    } catch (err) {
+      console.error('[AgentsPanel] Delete error:', err)
+    }
   }, [workspaceId, fetchAgentFiles])
 
   // Rename a config file
@@ -147,7 +161,37 @@ export function AgentsPanel({
   const addOptimisticRef = useRef(addOptimisticAgentFiles)
   addOptimisticRef.current = addOptimisticAgentFiles
 
-  // ── Drag & drop: external file import for Sub-Agents (native DOM listeners) ──
+  const handlePasteAgents = useCallback(async () => {
+    const api = window.electronAPI
+    if (!api?.readClipboardFiles) {
+      console.warn('[agents-panel] electron clipboard API unavailable')
+      return
+    }
+
+    try {
+      const files = await api.readClipboardFiles()
+      console.log('[agents-panel] clipboard files', { files })
+      if (files.length === 0) {
+        console.warn('[agents-panel] no clipboard files returned')
+        return
+      }
+
+      const names = files.map((f: string) => f.split('/').pop()!).filter(Boolean)
+      if (names.length > 0) addOptimisticRef.current(names)
+
+      const res = await fetch(`/api/workspaces/${workspaceId}/fs/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sourcePaths: files, destinationFolder: 'agents' }),
+      })
+      console.log('[agents-panel] import response', { ok: res.ok, status: res.status })
+      if (!res.ok) console.warn('[agents-panel] import failed body:', await res.text())
+    } catch (error) {
+      console.error('[agents-panel] clipboard paste failed', error)
+    }
+
+    fetchAgentFilesRef.current()
+  }, [workspaceId])
 
   useEffect(() => {
     const container = subAgentsRef.current
@@ -220,7 +264,7 @@ export function AgentsPanel({
     }
   }, [workspaceId])
 
-  // ── Cmd+V paste from Finder clipboard for Sub-Agents ──
+  // ── Paste from system clipboard for Sub-Agents ──
 
   useEffect(() => {
     const el = subAgentsRef.current
@@ -233,32 +277,13 @@ export function AgentsPanel({
       const isMod = e.metaKey || e.ctrlKey
       if (isMod && e.key === 'v') {
         e.preventDefault()
-        const api = window.electronAPI
-        if (api?.readClipboardFiles) {
-          try {
-            const files = await api.readClipboardFiles()
-            if (files.length > 0) {
-              // Optimistic: add placeholder nodes immediately
-              const names = files.map((f: string) => f.split('/').pop()!).filter(Boolean)
-              if (names.length > 0) addOptimisticRef.current(names)
-
-              await fetch(`/api/workspaces/${workspaceId}/fs/import`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ sourcePaths: files, destinationFolder: 'agents' }),
-              })
-              fetchAgentFilesRef.current()
-            }
-          } catch {
-            fetchAgentFilesRef.current() // revert optimistic on error
-          }
-        }
+        await handlePasteAgents()
       }
     }
 
     el.addEventListener('keydown', handler)
     return () => el.removeEventListener('keydown', handler)
-  }, [workspaceId])
+  }, [handlePasteAgents])
 
   // Filter
   const filteredConfigFiles = search
@@ -384,7 +409,27 @@ export function AgentsPanel({
               ))}
 
               {agentFiles.length === 0 && !search && !creatingAgent && (
-                <p className="text-[10px] text-muted px-2 py-1">{t('status.noSubAgents')}</p>
+                <div
+                  className="px-2 py-6"
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    setContextMenu({ x: e.clientX, y: e.clientY, targetPath: '', targetSection: 'subagent', targetType: 'root' })
+                  }}
+                >
+                  <div className="flex flex-col items-center text-center gap-3">
+                    <p className="text-[10px] text-muted">{t('status.noSubAgents')}</p>
+                    <button
+                      type="button"
+                      onClick={() => void handlePasteAgents()}
+                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-[12px] font-medium text-primary bg-elevated hover:bg-surface-hover transition-colors"
+                    >
+                      <ClipboardPaste size={12} className="text-tertiary" />
+                      <span>{t('contextMenu.paste')}</span>
+                    </button>
+                    <p className="text-[10px] text-muted">{shortcutLabel}V</p>
+                  </div>
+                </div>
               )}
             </>
           )}
@@ -400,32 +445,49 @@ export function AgentsPanel({
           className="fixed bg-surface border border-subtle rounded-lg shadow-lg z-50 py-1 w-[160px] animate-slide-down"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
-          <button
-            onClick={() => {
-              setRenaming({
-                path: contextMenu.targetPath,
-                section: contextMenu.targetSection,
-                value: contextMenu.targetPath.split('/').pop() || contextMenu.targetPath,
-              })
-              setContextMenu(null)
-            }}
-            className="flex items-center gap-2 w-full px-3 py-1.5 text-[12px] text-primary hover:bg-surface-hover transition-colors"
-          >
-            <Pencil size={12} className="text-tertiary" /> {t('common.rename')}
-          </button>
-          <button
-            onClick={() => {
-              if (contextMenu.targetSection === 'config') {
-                onDeleteConfigFile(contextMenu.targetPath)
-              } else {
-                handleDeleteAgent(contextMenu.targetPath)
-              }
-              setContextMenu(null)
-            }}
-            className="flex items-center gap-2 w-full px-3 py-1.5 text-[12px] text-coral hover:bg-surface-hover transition-colors"
-          >
-            <Trash2 size={12} /> {t('common.delete')}
-          </button>
+          {contextMenu.targetSection === 'subagent' && contextMenu.targetType === 'root' ? (
+            <button
+              onClick={() => {
+                void handlePasteAgents()
+                setContextMenu(null)
+              }}
+              className="flex items-center justify-between w-full px-3 py-1.5 text-[12px] text-primary hover:bg-surface-hover transition-colors"
+            >
+              <span className="flex items-center gap-2">
+                <ClipboardPaste size={12} className="text-tertiary" /> {t('contextMenu.paste')}
+              </span>
+              <span className="text-[10px] text-muted">{shortcutLabel}V</span>
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={() => {
+                  setRenaming({
+                    path: contextMenu.targetPath,
+                    section: contextMenu.targetSection,
+                    value: contextMenu.targetPath.split('/').pop() || contextMenu.targetPath,
+                  })
+                  setContextMenu(null)
+                }}
+                className="flex items-center gap-2 w-full px-3 py-1.5 text-[12px] text-primary hover:bg-surface-hover transition-colors"
+              >
+                <Pencil size={12} className="text-tertiary" /> {t('common.rename')}
+              </button>
+              <button
+                onClick={() => {
+                  if (contextMenu.targetSection === 'config') {
+                    onDeleteConfigFile(contextMenu.targetPath)
+                  } else {
+                    handleDeleteAgent(contextMenu.targetPath)
+                  }
+                  setContextMenu(null)
+                }}
+                className="flex items-center gap-2 w-full px-3 py-1.5 text-[12px] text-coral hover:bg-surface-hover transition-colors"
+              >
+                <Trash2 size={12} /> {t('common.delete')}
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>

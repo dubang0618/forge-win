@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   ChevronRight, ChevronDown, Folder, FileText,
   FilePlus, FolderPlus, Search, Save, WrapText, Pencil, Trash2,
+  Copy, Scissors, ClipboardPaste,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useI18n } from '@/components/providers/i18n-provider'
@@ -37,6 +38,20 @@ interface TemplateEditorPanelProps {
 
 /* ── Component ── */
 
+function isTextEditingTarget(target: EventTarget | null) {
+  const el = target instanceof HTMLElement ? target : null
+  if (!el) return false
+  if (el.isContentEditable) return true
+  if (el.closest('[contenteditable="true"]')) return true
+  const tag = el.tagName
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
+}
+
+function isWithinTree(target: EventTarget | null, treeEl: HTMLElement | null) {
+  const el = target instanceof Node ? target : null
+  return !!(el && treeEl?.contains(el))
+}
+
 export function TemplateEditorPanel({ templateId, templateName }: TemplateEditorPanelProps) {
   const { t } = useI18n()
 
@@ -49,6 +64,7 @@ export function TemplateEditorPanel({ templateId, templateName }: TemplateEditor
   const [renaming, setRenaming] = useState<{ path: string; value: string } | null>(null)
   const [creating, setCreating] = useState<{ parentPath: string; type: 'file' | 'folder' } | null>(null)
   const [selectedNode, setSelectedNode] = useState<{ path: string; type: 'file' | 'folder' } | null>(null)
+  const [clipboardState, setClipboardState] = useState<{ action: 'copy' | 'cut'; path: string } | null>(null)
   const [treeWidth, setTreeWidth] = useState(200)
 
   // Editor state
@@ -61,6 +77,7 @@ export function TemplateEditorPanel({ templateId, templateName }: TemplateEditor
   // Drag & drop state — panelRef covers the entire editor panel for drop targets
   const panelRef = useRef<HTMLDivElement>(null)
   const treeRef = useRef<HTMLDivElement>(null)
+  const editorPaneRef = useRef<HTMLDivElement>(null)
   const dragOverPathRef = useRef<string | null>(null)
   const draggedPathRef = useRef<string | null>(null)
   const [isDraggingExternal, setIsDraggingExternal] = useState(false)
@@ -182,13 +199,23 @@ export function TemplateEditorPanel({ templateId, templateName }: TemplateEditor
         setContent('')
         setDirty(false)
       }
-      // Clear selectedNode if it was deleted (prevents ghost re-creation on next paste)
       if (selectedNode?.path === relPath || selectedNode?.path.startsWith(relPath + '/')) {
         setSelectedNode(null)
       }
+      if (clipboardState?.path === relPath || clipboardState?.path.startsWith(relPath + '/')) {
+        setClipboardState(null)
+      }
       fetchTree()
     } catch { /* ignore */ }
-  }, [templateId, fetchTree, selectedFilePath, selectedNode])
+  }, [templateId, fetchTree, selectedFilePath, selectedNode, clipboardState])
+
+  const handleCopy = useCallback((path: string) => {
+    setClipboardState({ action: 'copy', path })
+  }, [])
+
+  const handleCut = useCallback((path: string) => {
+    setClipboardState({ action: 'cut', path })
+  }, [])
 
   /* ── Close context menu on click ── */
 
@@ -209,15 +236,33 @@ export function TemplateEditorPanel({ templateId, templateName }: TemplateEditor
     setTree(prev => insertNodesIntoTree(prev, parentPath, newNodes))
   }, [])
 
-  /* ── OS clipboard paste (files from Finder via Cmd+V) ── */
+  /* ── OS clipboard paste ── */
 
   const handleClipboardPaste = useCallback(async (targetFolder: string) => {
+    if (clipboardState) {
+      const action = clipboardState.action === 'cut' ? 'move' : 'copy'
+      console.log('[template-editor] internal paste start', { action, source: clipboardState.path, targetFolder })
+      try {
+        const res = await fetch(`/api/marketplace/${templateId}/fs`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source: clipboardState.path, destination: targetFolder, action }),
+        })
+        console.log('[template-editor] internal paste response', { ok: res.ok, status: res.status })
+        if (clipboardState.action === 'cut') setClipboardState(null)
+        fetchTree()
+      } catch (error) {
+        console.error('[template-editor] internal paste failed', error)
+      }
+      return
+    }
+
     const api = window.electronAPI
     if (api?.readClipboardFiles) {
       try {
         const files = await api.readClipboardFiles()
+        console.log('[template-editor] clipboard files', { targetFolder, files })
         if (files.length > 0) {
-          // Optimistic: add placeholder nodes immediately
           const names = files.map(f => f.split('/').pop()!).filter(Boolean)
           if (names.length > 0) addOptimisticNodes(targetFolder, names, 'folder')
 
@@ -229,15 +274,20 @@ export function TemplateEditorPanel({ templateId, templateName }: TemplateEditor
               destinationFolder: targetFolder,
             }),
           })
-          // Always refresh to get real state (replaces optimistic)
+          console.log('[template-editor] import response', { ok: res.ok, status: res.status })
           fetchTree()
-          if (!res.ok) console.warn('Import failed:', await res.text())
+          if (!res.ok) console.warn('[template-editor] import failed body:', await res.text())
+        } else {
+          console.warn('[template-editor] no clipboard files returned')
         }
-      } catch {
-        fetchTree() // revert optimistic on error
+      } catch (error) {
+        console.error('[template-editor] clipboard paste failed', error)
+        fetchTree()
       }
+    } else {
+      console.warn('[template-editor] electron clipboard API unavailable')
     }
-  }, [templateId, fetchTree, addOptimisticNodes])
+  }, [clipboardState, templateId, fetchTree, addOptimisticNodes])
 
   /* ── Keyboard shortcuts on tree container ── */
 
@@ -246,13 +296,31 @@ export function TemplateEditorPanel({ templateId, templateName }: TemplateEditor
     if (!el) return
 
     const handler = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return
-
       const isMod = e.metaKey || e.ctrlKey
+      if (!isMod && e.key !== 'F2') return
+      if (isTextEditingTarget(e.target)) return
 
-      // Cmd+V paste: works even without selection (paste to root)
-      if (isMod && e.key === 'v') {
+      const treeEl = treeRef.current
+      const activeElement = document.activeElement
+      const treeHasFocus = !!treeEl && (treeEl === activeElement || treeEl.contains(activeElement))
+      const editorHasFocus = !!editorPaneRef.current && !!activeElement && editorPaneRef.current.contains(activeElement)
+      const emptyStateHasFocus = activeElement instanceof HTMLElement && activeElement.dataset.emptyStatePaste === 'true'
+      const eventCameFromTree = isWithinTree(e.target, treeEl)
+      const shouldHandleTreeShortcut = treeHasFocus || eventCameFromTree || emptyStateHasFocus
+
+      if (editorHasFocus && !emptyStateHasFocus) return
+
+      if (e.key === 'F2') {
+        if (!shouldHandleTreeShortcut || !selectedNode) return
+        e.preventDefault()
+        const name = selectedNode.path.split('/').pop() || ''
+        setRenaming({ path: selectedNode.path, value: name })
+        return
+      }
+
+      if (!shouldHandleTreeShortcut) return
+
+      if (e.key === 'v') {
         e.preventDefault()
         const targetFolder = !selectedNode ? ''
           : selectedNode.type === 'folder' ? selectedNode.path
@@ -260,11 +328,21 @@ export function TemplateEditorPanel({ templateId, templateName }: TemplateEditor
         handleClipboardPaste(targetFolder)
         return
       }
+
+      if (!selectedNode) return
+
+      if (e.key === 'c' && !e.shiftKey) {
+        e.preventDefault()
+        handleCopy(selectedNode.path)
+      } else if (e.key === 'x') {
+        e.preventDefault()
+        handleCut(selectedNode.path)
+      }
     }
 
     el.addEventListener('keydown', handler)
     return () => el.removeEventListener('keydown', handler)
-  }, [selectedNode, handleClipboardPaste])
+  }, [selectedNode, handleClipboardPaste, handleCopy, handleCut])
 
   /* ── Drag & drop: source handlers ── */
 
@@ -347,7 +425,7 @@ export function TemplateEditorPanel({ templateId, templateName }: TemplateEditor
         return
       }
 
-      // External file drop from Finder
+      // External file drop from OS
       const files = e.dataTransfer?.files
       if (files && files.length > 0) {
         const sourcePaths: string[] = []
@@ -484,6 +562,7 @@ export function TemplateEditorPanel({ templateId, templateName }: TemplateEditor
               node={node}
               depth={0}
               selectedPath={selectedNode?.path ?? null}
+              clipboardCutPath={clipboardState?.action === 'cut' ? clipboardState.path : null}
               onSelect={(path) => setSelectedFilePath(path)}
               onSelectNode={setSelectedNode}
               onContextMenu={(e, path, type) => {
@@ -524,10 +603,49 @@ export function TemplateEditorPanel({ templateId, templateName }: TemplateEditor
                   <FolderPlus size={12} className="text-tertiary" /> {t('button.newFolder')}
                 </button>
                 <div className="h-px bg-subtle mx-2 my-1" />
+                <button
+                  onClick={() => {
+                    handleClipboardPaste(contextMenu.targetPath)
+                    setContextMenu(null)
+                  }}
+                  className="flex items-center gap-2 w-full px-3 py-1.5 text-[12px] text-primary hover:bg-surface-hover transition-colors"
+                >
+                  <ClipboardPaste size={12} className="text-tertiary" /> {t('contextMenu.paste')}
+                </button>
+                <div className="h-px bg-subtle mx-2 my-1" />
               </>
+            )}
+            {contextMenu.targetType === 'root' && (
+              <button
+                onClick={() => {
+                  handleClipboardPaste('')
+                  setContextMenu(null)
+                }}
+                className="flex items-center gap-2 w-full px-3 py-1.5 text-[12px] text-primary hover:bg-surface-hover transition-colors"
+              >
+                <ClipboardPaste size={12} className="text-tertiary" /> {t('contextMenu.paste')}
+              </button>
             )}
             {contextMenu.targetType !== 'root' && (
               <>
+                <button
+                  onClick={() => {
+                    handleCopy(contextMenu.targetPath)
+                    setContextMenu(null)
+                  }}
+                  className="flex items-center gap-2 w-full px-3 py-1.5 text-[12px] text-primary hover:bg-surface-hover transition-colors"
+                >
+                  <Copy size={12} className="text-tertiary" /> {t('contextMenu.copy')}
+                </button>
+                <button
+                  onClick={() => {
+                    handleCut(contextMenu.targetPath)
+                    setContextMenu(null)
+                  }}
+                  className="flex items-center gap-2 w-full px-3 py-1.5 text-[12px] text-primary hover:bg-surface-hover transition-colors"
+                >
+                  <Scissors size={12} className="text-tertiary" /> {t('contextMenu.cut')}
+                </button>
                 <button
                   onClick={() => {
                     const name = contextMenu.targetPath.split('/').pop() || ''
@@ -604,7 +722,7 @@ export function TemplateEditorPanel({ templateId, templateName }: TemplateEditor
               ) : (
                 <>
                   {(editorMode === 'edit' || editorMode === 'split') && (
-                    <div className={cn('flex-1 overflow-hidden', editorMode === 'split' && 'border-r border-subtle')}>
+                    <div className={cn('flex-1 overflow-hidden', editorMode === 'split' && 'border-r border-subtle')} ref={editorPaneRef}>
                       <CodeEditor
                         value={content}
                         onChange={(v) => { setContent(v); setDirty(true) }}
@@ -632,12 +750,43 @@ export function TemplateEditorPanel({ templateId, templateName }: TemplateEditor
           </>
         ) : (
           /* Empty state: no file selected */
-          <div className="flex items-center justify-center h-full">
+          <div
+            className="flex items-center justify-center h-full cursor-pointer"
+            tabIndex={0}
+            data-empty-state-paste="true"
+            onClick={(e) => (e.currentTarget as HTMLDivElement).focus()}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setContextMenu({ x: e.clientX, y: e.clientY, targetPath: '', targetType: 'root' })
+            }}
+            onKeyDown={(e) => {
+              const isMod = e.metaKey || e.ctrlKey
+              if (isMod && e.key === 'v') {
+                e.preventDefault()
+                void handleClipboardPaste('')
+              }
+            }}
+          >
             <div className="text-center">
               <div className="w-12 h-12 rounded-xl bg-elevated flex items-center justify-center mx-auto mb-3">
                 <FileText size={24} className="text-tertiary" />
               </div>
               <p className="text-[13px] text-secondary">{t('marketplace.selectFile')}</p>
+              <div className="mt-3 flex flex-col items-center gap-2">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    void handleClipboardPaste('')
+                  }}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-[12px] font-medium text-primary bg-elevated hover:bg-surface-hover transition-colors"
+                >
+                  <ClipboardPaste size={12} className="text-tertiary" />
+                  <span>{t('contextMenu.paste')}</span>
+                </button>
+                <p className="text-[11px] text-muted">Ctrl+V 可粘贴文件到模板根目录</p>
+              </div>
             </div>
           </div>
         )}
@@ -649,7 +798,7 @@ export function TemplateEditorPanel({ templateId, templateName }: TemplateEditor
 /* ── FileTreeItem ── */
 
 function FileTreeItem({
-  node, depth, selectedPath, onSelect, onSelectNode, onContextMenu,
+  node, depth, selectedPath, clipboardCutPath, onSelect, onSelectNode, onContextMenu,
   renaming, onRenameSubmit, onRenameCancel,
   creating, onCreateSubmit, onCreateCancel,
   onDragStart, onDragEnd,
@@ -657,6 +806,7 @@ function FileTreeItem({
   node: TreeNode
   depth: number
   selectedPath: string | null
+  clipboardCutPath: string | null
   onSelect: (path: string) => void
   onSelectNode: (node: { path: string; type: 'file' | 'folder' }) => void
   onContextMenu: (e: React.MouseEvent, path: string, type: 'file' | 'folder') => void
@@ -672,6 +822,7 @@ function FileTreeItem({
   const [expanded, setExpanded] = useState(depth < 2)
   const isFolder = node.type === 'folder'
   const isSelected = selectedPath === node.path
+  const isCut = clipboardCutPath === node.path
   const isRenaming = renaming?.path === node.path
   const wasDragged = useRef(false)
 
@@ -697,7 +848,8 @@ function FileTreeItem({
         onDragEnd={() => { setTimeout(() => { wasDragged.current = false }, 100); onDragEnd() }}
         className={cn(
           'flex items-center gap-1 w-full h-[26px] px-1.5 rounded cursor-pointer transition-colors',
-          isSelected ? 'bg-elevated' : 'hover:bg-surface-hover'
+          isSelected ? 'bg-elevated' : 'hover:bg-surface-hover',
+          isCut && 'opacity-50'
         )}
         style={{ paddingLeft: `${depth * 16 + 4}px` }}
       >
@@ -751,6 +903,7 @@ function FileTreeItem({
               node={child}
               depth={depth + 1}
               selectedPath={selectedPath}
+              clipboardCutPath={clipboardCutPath}
               onSelect={onSelect}
               onSelectNode={onSelectNode}
               onContextMenu={onContextMenu}

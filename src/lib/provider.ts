@@ -130,7 +130,7 @@ export function resolveProvider(model?: string): ResolvedProvider {
       const customEndpoint = db.prepare("SELECT value FROM settings WHERE key = 'custom_api_endpoint'").get() as { value: string } | undefined
       baseUrl = customEndpoint?.value || row?.base_url || undefined
     } else {
-      baseUrl = catalog.anthropicBaseUrl
+      baseUrl = row?.base_url || catalog.anthropicBaseUrl
     }
 
     if (row?.api_key) {

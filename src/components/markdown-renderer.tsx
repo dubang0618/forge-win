@@ -64,7 +64,12 @@ function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
 
   const handleCopy = useCallback(async () => {
-    await navigator.clipboard.writeText(text)
+    const api = window.electronAPI
+    if (api?.copyToClipboard) {
+      await api.copyToClipboard(text)
+    } else {
+      await navigator.clipboard.writeText(text)
+    }
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }, [text])

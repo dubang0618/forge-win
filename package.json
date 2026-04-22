@@ -22,7 +22,8 @@
     "package:mac": "pnpm build && electron-builder --mac",
     "package:win": "pnpm build && electron-builder --win",
     "package:linux": "pnpm build && electron-builder --linux",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "clipboard:helper:build": "python -m PyInstaller --onefile --name read_windows_clipboard_files scripts/read_windows_clipboard_files.py"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.83",
@@ -51,6 +52,7 @@
     "electron": "40.8.0",
     "electron-builder": "^26.0.0",
     "esbuild": "^0.25.0",
+    "playwright": "^1.59.1",
     "postcss": "^8.4.0",
     "tailwindcss": "^3.4.0",
     "tsup": "^8.0.0",

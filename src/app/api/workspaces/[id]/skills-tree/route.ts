@@ -9,6 +9,7 @@ interface SkillTreeNode {
   path: string
   children?: SkillTreeNode[]
   enabled?: boolean
+  isSymlink?: boolean
 }
 
 function buildSkillsTree(dirPath: string, basePath = '', maxDepth = 6, depth = 0): SkillTreeNode[] {
@@ -24,6 +25,17 @@ function buildSkillsTree(dirPath: string, basePath = '', maxDepth = 6, depth = 0
 
   return entries.map(entry => {
     const relPath = basePath ? `${basePath}/${entry.name}` : entry.name
+    const fullPath = path.join(dirPath, entry.name)
+
+    // Check if it's a symlink
+    let isSymlink = false
+    try {
+      const stats = fs.lstatSync(fullPath)
+      isSymlink = stats.isSymbolicLink()
+    } catch {
+      // Ignore errors
+    }
+
     if (entry.isDirectory()) {
       // Check if skill folder has SKILL.md → mark as enabled
       const skillMd = path.join(dirPath, entry.name, 'SKILL.md')
@@ -44,9 +56,15 @@ function buildSkillsTree(dirPath: string, basePath = '', maxDepth = 6, depth = 0
         path: relPath,
         children: buildSkillsTree(path.join(dirPath, entry.name), relPath, maxDepth, depth + 1),
         ...(hasSkillMd && { enabled }),
+        ...(isSymlink && { isSymlink: true }),
       }
     }
-    return { name: entry.name, type: 'file' as const, path: relPath }
+    return {
+      name: entry.name,
+      type: 'file' as const,
+      path: relPath,
+      ...(isSymlink && { isSymlink: true }),
+    }
   })
 }
 

@@ -237,11 +237,23 @@ export function RightSidebar({
 
   const handleDelete = useCallback(async (fullPath: string) => {
     try {
-      await fetch(`/api/workspaces/${workspaceId}/fs?path=${encodeURIComponent(fullPath)}&scope=${apiScope}`, {
+      console.log('[RightSidebar] Deleting:', { fullPath, workspaceId, apiScope })
+      const res = await fetch(`/api/workspaces/${workspaceId}/fs?path=${encodeURIComponent(fullPath)}&scope=${apiScope}`, {
         method: 'DELETE',
       })
+      if (!res.ok) {
+        const error = await res.text()
+        console.error('[RightSidebar] Delete failed:', error)
+        return
+      }
+      console.log('[RightSidebar] Delete successful:', fullPath)
+      // Add a small delay before refreshing to ensure file system operations complete
+      // and to avoid race conditions with the file watcher
+      await new Promise(resolve => setTimeout(resolve, 100))
       fetchTree()
-    } catch { /* ignore */ }
+    } catch (err) {
+      console.error('[RightSidebar] Delete error:', err)
+    }
   }, [workspaceId, fetchTree, apiScope])
 
   const handleContextMenu = useCallback((e: React.MouseEvent, targetPath: string, targetType: 'file' | 'folder') => {
@@ -271,6 +283,8 @@ export function RightSidebar({
     setTree(prev => insertSidebarNodesIntoTree(prev, targetFolder, newNodes))
   }, [])
 
+  const shortcutLabel = window.electronAPI?.platform === 'darwin' ? '⌘' : 'Ctrl+'
+
   const handlePaste = useCallback(async (targetFolder: string) => {
     if (!workspaceId) return
 
@@ -289,7 +303,7 @@ export function RightSidebar({
       return
     }
 
-    // OS clipboard paste (files from Finder)
+    // OS clipboard paste
     const api = window.electronAPI
     if (api?.readClipboardFiles) {
       try {
@@ -332,7 +346,7 @@ export function RightSidebar({
     }
   }, [])
 
-  const handleRevealInFinder = useCallback((relPath: string) => {
+  const handleShowInFolder = useCallback((relPath: string) => {
     const absPath = workspacePath ? `${workspacePath}/${relPath}` : relPath
     window.electronAPI?.showInFolder(absPath)
   }, [workspacePath])
@@ -765,14 +779,14 @@ export function RightSidebar({
             className="flex items-center justify-between w-full px-3 py-1.5 text-[12px] text-primary hover:bg-surface-hover transition-colors"
           >
             <span className="flex items-center gap-2"><Copy size={12} className="text-tertiary" /> Copy</span>
-            <span className="text-[10px] text-muted">⌘C</span>
+            <span className="text-[10px] text-muted">{shortcutLabel}C</span>
           </button>
           <button
             onClick={() => { handleCut(contextMenu.targetPath); setContextMenu(null) }}
             className="flex items-center justify-between w-full px-3 py-1.5 text-[12px] text-primary hover:bg-surface-hover transition-colors"
           >
             <span className="flex items-center gap-2"><Scissors size={12} className="text-tertiary" /> Cut</span>
-            <span className="text-[10px] text-muted">⌘X</span>
+            <span className="text-[10px] text-muted">{shortcutLabel}X</span>
           </button>
           <button
             onClick={() => {
@@ -786,7 +800,7 @@ export function RightSidebar({
             className="flex items-center justify-between w-full px-3 py-1.5 text-[12px] text-primary hover:bg-surface-hover transition-colors disabled:opacity-40"
           >
             <span className="flex items-center gap-2"><ClipboardPaste size={12} className="text-tertiary" /> Paste</span>
-            <span className="text-[10px] text-muted">⌘V</span>
+            <span className="text-[10px] text-muted">{shortcutLabel}V</span>
           </button>
           <div className="h-px bg-subtle mx-2 my-1" />
           {/* Rename / Delete */}
@@ -823,10 +837,10 @@ export function RightSidebar({
           </button>
           {!isGlobalMode && (
             <button
-              onClick={() => { handleRevealInFinder(contextMenu.targetPath); setContextMenu(null) }}
+              onClick={() => { handleShowInFolder(contextMenu.targetPath); setContextMenu(null) }}
               className="flex items-center gap-2 w-full px-3 py-1.5 text-[12px] text-primary hover:bg-surface-hover transition-colors"
             >
-              <FolderInput size={12} className="text-tertiary" /> Reveal in Finder
+              <FolderInput size={12} className="text-tertiary" /> {window.electronAPI?.platform === 'darwin' ? 'Reveal in Finder' : 'Show in Folder'}
             </button>
           )}
         </div>

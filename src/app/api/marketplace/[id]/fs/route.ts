@@ -93,6 +93,78 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 }
 
+// PUT /api/marketplace/[id]/fs — copy or move file or folder
+export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
+  const db = getDb()
+
+  const existing = db.prepare('SELECT * FROM marketplace_templates WHERE id = ?').get(id)
+  if (!existing) return NextResponse.json({ error: 'Template not found' }, { status: 404 })
+
+  let body: Record<string, unknown>
+  try { body = await req.json() } catch { return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }) }
+  const { source, destination, action } = body as {
+    source?: string; destination?: string; action?: 'copy' | 'move'
+  }
+
+  if (!source || destination == null || !action) {
+    return NextResponse.json({ error: 'source, destination, and action required' }, { status: 400 })
+  }
+
+  if (source.includes('..') || destination.includes('..')) {
+    return NextResponse.json({ error: 'Invalid path' }, { status: 400 })
+  }
+
+  const resolvedSource = resolveTemplatePath(id, source)
+  const resolvedDestination = resolveTemplatePath(id, destination)
+  if (!resolvedSource || !resolvedDestination) {
+    return NextResponse.json({ error: 'path traversal not allowed' }, { status: 400 })
+  }
+
+  try {
+    if (!fs.existsSync(resolvedSource.abs)) {
+      return NextResponse.json({ error: 'source does not exist' }, { status: 404 })
+    }
+
+    let finalDest = resolvedDestination.abs
+    if (fs.existsSync(finalDest) && fs.statSync(finalDest).isDirectory()) {
+      finalDest = nodePath.join(finalDest, nodePath.basename(resolvedSource.abs))
+    }
+
+    fs.mkdirSync(nodePath.dirname(finalDest), { recursive: true })
+
+    if (action === 'move' && fs.statSync(resolvedSource.abs).isDirectory() && finalDest.startsWith(resolvedSource.abs + nodePath.sep)) {
+      return NextResponse.json({ error: 'cannot move folder into itself' }, { status: 400 })
+    }
+
+    if (action === 'copy' && fs.existsSync(finalDest)) {
+      const ext = nodePath.extname(finalDest)
+      const base = finalDest.slice(0, finalDest.length - ext.length)
+      let counter = 1
+      while (fs.existsSync(finalDest)) {
+        finalDest = `${base} (${counter})${ext}`
+        counter++
+      }
+    }
+
+    if (action === 'copy') {
+      fs.cpSync(resolvedSource.abs, finalDest, { recursive: true })
+    } else {
+      try {
+        fs.renameSync(resolvedSource.abs, finalDest)
+      } catch {
+        fs.cpSync(resolvedSource.abs, finalDest, { recursive: true })
+        fs.rmSync(resolvedSource.abs, { recursive: true, force: true })
+      }
+    }
+
+    db.prepare("UPDATE marketplace_templates SET updated_at = datetime('now') WHERE id = ?").run(id)
+    return NextResponse.json({ ok: true })
+  } catch (err) {
+    return NextResponse.json({ error: String(err) }, { status: 400 })
+  }
+}
+
 // DELETE /api/marketplace/[id]/fs — delete file or folder
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params

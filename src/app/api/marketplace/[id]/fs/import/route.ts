@@ -4,6 +4,25 @@ import { getTemplatePath } from '@/lib/marketplace-fs'
 import fs from 'fs'
 import nodePath from 'path'
 
+// Recursive copy helper to avoid fs.cpSync crashes with Chinese paths on Windows
+function copyDirRecursive(src: string, dest: string) {
+  const stat = fs.statSync(src)
+  if (stat.isDirectory()) {
+    if (!fs.existsSync(dest)) {
+      fs.mkdirSync(dest, { recursive: true })
+    }
+    const entries = fs.readdirSync(src, { withFileTypes: true })
+    for (const entry of entries) {
+      copyDirRecursive(
+        nodePath.join(src, entry.name),
+        nodePath.join(dest, entry.name)
+      )
+    }
+  } else {
+    fs.copyFileSync(src, dest)
+  }
+}
+
 // POST /api/marketplace/[id]/fs/import — import files from absolute paths into template
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -56,7 +75,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         }
       }
 
-      fs.cpSync(srcPath, finalDest, { recursive: true })
+      copyDirRecursive(srcPath, finalDest)
       imported.push(nodePath.basename(finalDest))
     }
 

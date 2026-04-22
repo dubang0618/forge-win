@@ -1,8 +1,8 @@
-import { app, BrowserWindow, shell, ipcMain, dialog, clipboard } from 'electron'
+import { app, BrowserWindow, shell, ipcMain, dialog, clipboard, Menu } from 'electron'
 import path from 'node:path'
 import os from 'node:os'
 import { createServer } from 'node:net'
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
 import { existsSync, readdirSync, statSync, watch, type FSWatcher } from 'node:fs'
 
 const isDev = !app.isPackaged
@@ -17,14 +17,8 @@ let serverUrl: string | null = null  // Module-level for activate handler
  */
 function findNodeBinary(): string {
   if (!isDev) {
-    // Production: use bundled Node.js runtime (path differs by platform)
+    const resourcesDir = getResourcesDir()
     const isWin = process.platform === 'win32'
-
-    // Use app.getAppPath() to get the correct base path
-    // In production, app.getAppPath() returns the path to app.asar
-    const appPath = app.getAppPath()
-    // Resources directory is alongside app.asar in Contents/Resources/
-    const resourcesDir = path.dirname(appPath)
 
     const bundled = isWin
       ? path.join(resourcesDir, 'node-runtime', 'node.exe')
@@ -47,8 +41,83 @@ function findNodeBinary(): string {
   console.log('[server] Using system Node.js')
   return 'node'
 }
+
 let serverProcess: ChildProcess | null = null
 let currentWatcher: FSWatcher | null = null
+
+function getResourcesDir(): string {
+  if (isDev) return app.getAppPath()
+  return path.dirname(app.getAppPath())
+}
+
+function getWindowsClipboardHelperPath(): string {
+  // Try Python script first (more reliable)
+  const pyScript = path.join(app.getAppPath(), 'scripts', 'read_windows_clipboard_files.py')
+  if (existsSync(pyScript)) {
+    return pyScript
+  }
+
+  // Fallback to .exe
+  if (isDev) {
+    return path.join(app.getAppPath(), 'build', 'win-helpers', 'read_windows_clipboard_files.exe')
+  }
+  return path.join(getResourcesDir(), 'win-helpers', 'read_windows_clipboard_files.exe')
+}
+
+function readWindowsClipboardFilesFromHelper() {
+  const helperPath = getWindowsClipboardHelperPath()
+  if (!existsSync(helperPath)) {
+    console.warn('[clipboard:readFiles][win32] helper missing:', helperPath)
+    return []
+  }
+
+  try {
+    let raw: string
+
+    // If it's a Python script, run with python
+    if (helperPath.endsWith('.py')) {
+      console.log('[clipboard:readFiles][win32] using Python script:', helperPath)
+      // Read as buffer first to handle UTF-8 properly
+      const buffer = execFileSync('python', [helperPath], {
+        encoding: 'buffer',
+        timeout: 3000,
+        windowsHide: !isDev,  // Show terminal in dev mode for debugging
+      })
+      // Decode as UTF-8
+      raw = buffer.toString('utf8')
+      console.log('[clipboard:readFiles][win32] Python raw output:', { length: raw.length, preview: raw.slice(0, 200) })
+    } else {
+      console.log('[clipboard:readFiles][win32] using exe:', helperPath)
+      raw = execFileSync(helperPath, [], {
+        encoding: 'utf8',
+        timeout: 3000,
+        windowsHide: !isDev,  // Show terminal in dev mode for debugging
+      })
+    }
+
+    const parsed = JSON.parse(raw)
+    console.log('[clipboard:readFiles][win32] parsed JSON:', parsed)
+    if (!Array.isArray(parsed)) {
+      console.warn('[clipboard:readFiles][win32] parsed result is not an array:', typeof parsed)
+      return []
+    }
+    const normalized = parsed
+      .filter((value): value is string => typeof value === 'string')
+      .map(value => value.trim())
+      .filter(Boolean)
+      .filter(value => path.isAbsolute(value))
+      .filter(value => existsSync(value))
+    console.log('[clipboard:readFiles][win32] helper parsed paths:', normalized)
+    return normalized
+  } catch (error) {
+    console.error('[clipboard:readFiles][win32] helper failed:', error)
+    if (error instanceof Error && 'stderr' in error) {
+      console.error('[clipboard:readFiles][win32] stderr:', (error as any).stderr)
+    }
+    return []
+  }
+}
+
 
 // Directories to ignore when watching for file changes
 const WATCH_IGNORED = new Set(['node_modules', '.git', '.next', 'dist', 'build', 'out', '__pycache__'])
@@ -124,9 +193,7 @@ async function startServer(): Promise<number> {
 
   // Use app.getAppPath() to get the correct base path
   // In production, app.getAppPath() returns the path to app.asar
-  const appPath = app.getAppPath()
-  // Resources directory is alongside app.asar in Contents/Resources/
-  const resourcesDir = path.dirname(appPath)
+  const resourcesDir = getResourcesDir()
   const standaloneDir = path.join(resourcesDir, 'standalone')
   const cwd = findStandaloneAppRoot(standaloneDir)
   const serverScript = path.join(cwd, 'server.js')
@@ -192,6 +259,83 @@ async function startServer(): Promise<number> {
   return port
 }
 
+function createAppMenu() {
+  const template: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+  ]
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+}
+
+function normalizeClipboardPaths(paths: string[]) {
+  return paths
+    .map(p => p.replace(/^file:\/\//i, ''))
+    .map(p => p.trim())
+    .filter(Boolean)
+    .filter(p => existsSync(p))
+}
+
+function readWindowsClipboardFiles() {
+  const formats = clipboard.availableFormats()
+  const candidates = ['FileNameW', 'FileName', 'CF_HDROP', 'text/uri-list']
+
+  console.log('[clipboard:readFiles][win32] available formats:', formats)
+  console.log('[clipboard:readFiles][win32] checking candidates:', candidates)
+
+  for (const format of candidates) {
+    console.log('[clipboard:readFiles][win32] checking format:', format, 'available:', formats.includes(format))
+    if (!formats.includes(format)) continue
+
+    // Special handling for text/uri-list - use readText() instead of read()
+    let raw: string | undefined
+    if (format === 'text/uri-list') {
+      raw = clipboard.readText()
+      console.log('[clipboard:readFiles][win32] text/uri-list via readText():', { hasRaw: !!raw, rawLength: raw?.length ?? 0, rawPreview: raw?.slice(0, 300) ?? '' })
+    } else {
+      raw = clipboard.read(format)
+      console.log('[clipboard:readFiles][win32] format result:', format, { hasRaw: !!raw, rawLength: raw?.length ?? 0, rawPreview: raw?.slice(0, 300) ?? '' })
+    }
+
+    if (!raw) continue
+    const parsed = normalizeClipboardPaths(raw.split(/\r?\n|\0/))
+    console.log('[clipboard:readFiles][win32] parsed paths:', format, parsed)
+    if (parsed.length > 0) {
+      console.log('[clipboard:readFiles][win32] SUCCESS - returning paths:', parsed)
+      return parsed
+    }
+  }
+
+  console.log('[clipboard:readFiles][win32] no paths from standard formats, trying helper')
+  const helperResult = readWindowsClipboardFilesFromHelper()
+  console.log('[clipboard:readFiles][win32] helper result:', helperResult)
+  return helperResult
+}
+
 function createWindow(url: string) {
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -212,6 +356,11 @@ function createWindow(url: string) {
 
   mainWindow.loadURL(url)
 
+  // Open DevTools in development mode
+  if (isDev) {
+    mainWindow.webContents.openDevTools()
+  }
+
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show()
   })
@@ -229,6 +378,8 @@ function createWindow(url: string) {
 }
 
 app.whenReady().then(async () => {
+  createAppMenu()
+
   // Register IPC handlers
   ipcMain.handle('dialog:openDirectory', async () => {
     const parent = BrowserWindow.getFocusedWindow() || mainWindow
@@ -255,7 +406,7 @@ app.whenReady().then(async () => {
     let debounceTimer: ReturnType<typeof setTimeout> | null = null
 
     try {
-      currentWatcher = watch(dirPath, { recursive: true }, (_eventType, filename) => {
+      currentWatcher = watch(dirPath, { recursive: true }, (eventType, filename) => {
         if (!filename) return
         // Check if in ignored directory
         const parts = filename.split(path.sep)
@@ -267,38 +418,60 @@ app.whenReady().then(async () => {
           mainWindow?.webContents.send('fs:changed')
         }, 200)
       })
+
+      // Handle watcher errors (e.g., watched directory deleted)
+      currentWatcher.on('error', (err) => {
+        console.error('[fs:watch] Watcher error:', err)
+        if (currentWatcher) {
+          currentWatcher.close()
+          currentWatcher = null
+        }
+        if (debounceTimer) {
+          clearTimeout(debounceTimer)
+          debounceTimer = null
+        }
+      })
     } catch (err) {
       console.error('Failed to watch directory:', err)
     }
   })
 
-  // Read file paths from system clipboard (macOS Finder copy)
+  // Read file paths from system clipboard
   ipcMain.handle('clipboard:readFiles', () => {
     try {
+      const parseClipboardPaths = (raw: string) => normalizeClipboardPaths(raw.split(/\r?\n|\0/))
+
+      console.log('[clipboard:readFiles] request received', { platform: process.platform })
+
       // On macOS, copied files in Finder use 'NSFilenamesPboardType' format
       if (process.platform === 'darwin') {
         const raw = clipboard.read('NSFilenamesPboardType')
         if (raw) {
-          // NSFilenamesPboardType returns an XML plist with an array of paths
           const matches = raw.match(/<string>([^<]+)<\/string>/g)
           if (matches) {
             const filtered = matches.map(m => m.replace(/<\/?string>/g, '')).filter(p => {
-                // Filter out temp/cache paths that macOS injects (e.g. thumbnail images)
-                if (p.startsWith('/tmp/') || p.startsWith('/private/tmp/') ||
-                    p.startsWith('/private/var/') || p.startsWith('/var/folders/') ||
-                    p.includes('/.Trash/') || p.includes('/com.apple.') ||
-                    p.includes('/.TemporaryItems/')) {
-                  return false
-                }
-                // Only include paths that actually exist
-                return existsSync(p)
-              })
+              if (p.startsWith('/tmp/') || p.startsWith('/private/tmp/') ||
+                  p.startsWith('/private/var/') || p.startsWith('/var/folders/') ||
+                  p.includes('/.Trash/') || p.includes('/com.apple.') ||
+                  p.includes('/.TemporaryItems/')) {
+                return false
+              }
+              return existsSync(p)
+            })
+            console.log('[clipboard:readFiles][darwin] parsed paths:', filtered)
             return filtered
           }
         }
       }
+
+      if (process.platform === 'win32') {
+        return readWindowsClipboardFiles()
+      }
+
+      console.log('[clipboard:readFiles] unsupported platform or no paths found')
       return []
-    } catch {
+    } catch (error) {
+      console.error('[clipboard:readFiles] failed:', error)
       return []
     }
   })

@@ -150,6 +150,8 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   const relPath = searchParams.get('path')
   const scope = (searchParams.get('scope') || 'forge') as 'forge' | 'project'
 
+  console.log('[DELETE /api/workspaces/[id]/fs]', { id, relPath, scope })
+
   if (!relPath) {
     return NextResponse.json({ error: 'path query param required' }, { status: 400 })
   }
@@ -163,8 +165,10 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     } else {
       deleteForgeEntry(id, relPath)
     }
+    console.log('[DELETE /api/workspaces/[id]/fs] Success:', relPath)
     return NextResponse.json({ ok: true })
   } catch (err) {
+    console.error('[DELETE /api/workspaces/[id]/fs] Error:', err)
     return NextResponse.json({ error: String(err) }, { status: 400 })
   }
 }
