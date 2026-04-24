@@ -24,6 +24,11 @@ interface TaskResult {
 }
 
 export async function executeTask(task: CronTaskRow): Promise<TaskResult> {
+  const fs = require('fs')
+  const logPath = require('path').join(require('os').homedir(), '.forge', 'cron-debug.log')
+  fs.appendFileSync(logPath, `\n[${new Date().toISOString()}] ========== executeTask START ==========\n`)
+  fs.appendFileSync(logPath, `[${new Date().toISOString()}] Task ID: ${task.id}, Name: ${task.name}, Type: ${task.action_type}\n`)
+
   try {
     if (task.is_heartbeat) {
       return await executeHeartbeat(task)
@@ -42,6 +47,8 @@ export async function executeTask(task: CronTaskRow): Promise<TaskResult> {
     }
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : 'Unknown error'
+    fs.appendFileSync(logPath, `[${new Date().toISOString()}] EXCEPTION in executeTask: ${errorMsg}\n`)
+    fs.appendFileSync(logPath, `[${new Date().toISOString()}] Stack: ${err instanceof Error ? err.stack : 'N/A'}\n`)
     return { status: 'error', result: errorMsg, sessionId: '' }
   }
 }
@@ -91,7 +98,7 @@ async function executeHeartbeat(task: CronTaskRow): Promise<TaskResult> {
   const userMessage = `Run the following heartbeat checklist:\n\n${checklist}`
   const sessionTitle = `[Scheduled] ${task.name}`
 
-  const { text, sessionId } = await runAgentTask(systemPrompt, userMessage, workspaceId, sessionTitle)
+  const { text, sessionId } = await runAgentTask(systemPrompt, userMessage, workspaceId, sessionTitle, task.model)
 
   const isOk = text.includes('HEARTBEAT_OK')
   const status = isOk ? 'ok' : 'alert'
@@ -104,7 +111,13 @@ async function executeHeartbeat(task: CronTaskRow): Promise<TaskResult> {
 }
 
 async function executeRunAgent(task: CronTaskRow): Promise<TaskResult> {
+  const fs = require('fs')
+  const logPath = require('path').join(require('os').homedir(), '.forge', 'cron-debug.log')
+  fs.appendFileSync(logPath, `\n[${new Date().toISOString()}] executeRunAgent START - task: ${task.name}\n`)
+
   const config = parseConfig(task.config)
+  fs.appendFileSync(logPath, `[${new Date().toISOString()}] Config parsed: ${JSON.stringify(config)}\n`)
+
   const workspaceId = resolveWorkspaceId(task)
   if (!workspaceId) {
     return { status: 'error', result: 'No workspace configured for this task', sessionId: '' }
@@ -129,10 +142,16 @@ async function executeRunAgent(task: CronTaskRow): Promise<TaskResult> {
   const userMessage = task.action || `Execute the ${agentName} agent task.`
   const sessionTitle = `[Scheduled] ${task.name}`
 
-  const { text, sessionId } = await runAgentTask(systemPrompt, userMessage, workspaceId, sessionTitle)
+  fs.appendFileSync(logPath, `[${new Date().toISOString()}] About to call runAgentTask\n`)
+  const { text, sessionId } = await runAgentTask(systemPrompt, userMessage, workspaceId, sessionTitle, task.model)
+  fs.appendFileSync(logPath, `[${new Date().toISOString()}] runAgentTask completed - sessionId: ${sessionId}, text length: ${text.length}\n`)
 
   if (config.notify_channel) {
+    fs.appendFileSync(logPath, `[${new Date().toISOString()}] Notification channel configured: ${config.notify_channel}\n`)
     await notifyIm(config.notify_channel, `⏰ ${task.name}\n\n${text.slice(0, 1000)}`)
+    fs.appendFileSync(logPath, `[${new Date().toISOString()}] notifyIm call completed\n`)
+  } else {
+    fs.appendFileSync(logPath, `[${new Date().toISOString()}] No notification channel configured\n`)
   }
 
   return { status: 'ok', result: text.slice(0, 500), sessionId }
@@ -160,7 +179,7 @@ async function executeRunSkill(task: CronTaskRow): Promise<TaskResult> {
   const userMessage = task.action || `Execute the ${skillName} skill.`
   const sessionTitle = `[Scheduled] ${task.name}`
 
-  const { text, sessionId } = await runAgentTask(systemPrompt, userMessage, workspaceId, sessionTitle)
+  const { text, sessionId } = await runAgentTask(systemPrompt, userMessage, workspaceId, sessionTitle, task.model)
 
   if (config.notify_channel) {
     await notifyIm(config.notify_channel, `⏰ ${task.name}\n\n${text.slice(0, 1000)}`)
@@ -170,7 +189,13 @@ async function executeRunSkill(task: CronTaskRow): Promise<TaskResult> {
 }
 
 async function executeCustomPrompt(task: CronTaskRow): Promise<TaskResult> {
+  const fs = require('fs')
+  const logPath = require('path').join(require('os').homedir(), '.forge', 'cron-debug.log')
+  fs.appendFileSync(logPath, `\n[${new Date().toISOString()}] executeCustomPrompt START - task: ${task.name}\n`)
+
   const config = parseConfig(task.config)
+  fs.appendFileSync(logPath, `[${new Date().toISOString()}] Config parsed: ${JSON.stringify(config)}\n`)
+
   const workspaceId = resolveWorkspaceId(task)
   if (!workspaceId) {
     return { status: 'error', result: 'No workspace configured for this task', sessionId: '' }
@@ -186,10 +211,16 @@ async function executeCustomPrompt(task: CronTaskRow): Promise<TaskResult> {
   ].join('\n')
 
   const sessionTitle = `[Scheduled] ${task.name}`
-  const { text, sessionId } = await runAgentTask(systemPrompt, task.action, workspaceId, sessionTitle)
+  fs.appendFileSync(logPath, `[${new Date().toISOString()}] About to call runAgentTask\n`)
+  const { text, sessionId } = await runAgentTask(systemPrompt, task.action, workspaceId, sessionTitle, task.model)
+  fs.appendFileSync(logPath, `[${new Date().toISOString()}] runAgentTask completed - sessionId: ${sessionId}, text length: ${text.length}\n`)
 
   if (config.notify_channel) {
+    fs.appendFileSync(logPath, `[${new Date().toISOString()}] Notification channel configured: ${config.notify_channel}\n`)
     await notifyIm(config.notify_channel, `⏰ ${task.name}\n\n${text.slice(0, 1000)}`)
+    fs.appendFileSync(logPath, `[${new Date().toISOString()}] notifyIm call completed\n`)
+  } else {
+    fs.appendFileSync(logPath, `[${new Date().toISOString()}] No notification channel configured\n`)
   }
 
   return { status: 'ok', result: text.slice(0, 500), sessionId }
@@ -204,14 +235,31 @@ async function runAgentTask(
   userMessage: string,
   workspaceId: string,
   sessionTitle: string,
+  taskModel?: string,
 ): Promise<{ text: string; sessionId: string }> {
   const db = getDb()
   const sessionId = crypto.randomUUID()
 
+  // Priority: task.model > default_model setting > fallback
+  let model = 'claude-sonnet-4-6'
+  if (taskModel && taskModel.trim()) {
+    model = taskModel
+  } else {
+    const modelSetting = db.prepare("SELECT value FROM settings WHERE key = 'default_model'").get() as { value: string } | undefined
+    if (modelSetting?.value) {
+      // Try to parse as JSON first (for backward compatibility), fallback to raw string
+      try {
+        model = JSON.parse(modelSetting.value)
+      } catch {
+        model = modelSetting.value
+      }
+    }
+  }
+
   // Create a persistent session in the database so it appears in the chat list
   db.prepare(
     "INSERT INTO sessions (id, title, workspace, model, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', datetime('now'), datetime('now'))"
-  ).run(sessionId, sessionTitle, workspaceId, 'claude-sonnet-4-6')
+  ).run(sessionId, sessionTitle, workspaceId, model)
 
   // Store the user message
   const userMsgId = crypto.randomUUID()
@@ -219,13 +267,19 @@ async function runAgentTask(
     "INSERT INTO messages (id, session_id, role, content, created_at) VALUES (?, ?, 'user', ?, datetime('now'))"
   ).run(userMsgId, sessionId, JSON.stringify([{ type: 'text', text: userMessage }]))
 
+  // Debug logging to file
+  const fs = require('fs')
+  const logPath = require('path').join(require('os').homedir(), '.forge', 'cron-debug.log')
+  fs.appendFileSync(logPath, `\n[${new Date().toISOString()}] Cron Executor - Model: ${model}\n`)
+
   const q = createForgeQuery({
     prompt: userMessage,
     sessionId,
-    model: 'claude-sonnet-4-6',
+    model,
     workspaceId,
     bypassPermissions: true,
     customSystemPrompt: systemPrompt,
+    skipMcpServers: true,
   })
 
   const allTextBlocks: string[] = []
@@ -259,9 +313,17 @@ async function runAgentTask(
  *   2. Fall back to any bound chat (group)
  */
 async function notifyIm(channelId: string, message: string): Promise<void> {
+  const fs = require('fs')
+  const logPath = require('path').join(require('os').homedir(), '.forge', 'cron-debug.log')
+  fs.appendFileSync(logPath, `\n[${new Date().toISOString()}] notifyIm START - channelId: ${channelId}\n`)
+
   const manager = getBridgeManager()
-  if (!manager.isConnected(channelId)) {
+  const isConnected = manager.isConnected(channelId)
+  fs.appendFileSync(logPath, `[${new Date().toISOString()}] Channel connected: ${isConnected}\n`)
+
+  if (!isConnected) {
     console.log(`[Cron] IM channel ${channelId} not connected, skipping notification`)
+    fs.appendFileSync(logPath, `[${new Date().toISOString()}] Channel not connected, returning\n`)
     return
   }
 
@@ -271,28 +333,40 @@ async function notifyIm(channelId: string, message: string): Promise<void> {
     'SELECT chat_id FROM channel_bindings WHERE channel_id = ? ORDER BY created_at DESC',
   ).all(channelId) as { chat_id: string }[]
 
+  fs.appendFileSync(logPath, `[${new Date().toISOString()}] Found ${bindings.length} bindings\n`)
+
   if (bindings.length === 0) {
     console.log(`[Cron] No chat bindings for channel ${channelId}, skipping notification`)
+    fs.appendFileSync(logPath, `[${new Date().toISOString()}] No bindings found, returning\n`)
     return
   }
 
   // Send to the first (most recent) bound chat
   const targetChatId = bindings[0].chat_id
+  fs.appendFileSync(logPath, `[${new Date().toISOString()}] Target chat_id: ${targetChatId}\n`)
 
   try {
     const { DeliveryLayer } = await import('@/lib/im/delivery')
     const delivery = new DeliveryLayer()
     const adapters = manager.getAdapters()
     const adapter = adapters.get(channelId)
+
+    fs.appendFileSync(logPath, `[${new Date().toISOString()}] Adapter found: ${!!adapter}\n`)
+
     if (!adapter) {
       console.log(`[Cron] No adapter for channel ${channelId}`)
+      fs.appendFileSync(logPath, `[${new Date().toISOString()}] No adapter, returning\n`)
       return
     }
 
+    fs.appendFileSync(logPath, `[${new Date().toISOString()}] About to call delivery.deliver\n`)
     await delivery.deliver(adapter, targetChatId, message)
     console.log(`[Cron] Notification sent to ${channelId}:${targetChatId}: ${message.slice(0, 80)}`)
+    fs.appendFileSync(logPath, `[${new Date().toISOString()}] Notification sent successfully\n`)
   } catch (err) {
-    console.error(`[Cron] Failed to send notification to ${channelId}:`, err instanceof Error ? err.message : err)
+    const errMsg = err instanceof Error ? err.message : String(err)
+    console.error(`[Cron] Failed to send notification to ${channelId}:`, errMsg)
+    fs.appendFileSync(logPath, `[${new Date().toISOString()}] ERROR: ${errMsg}\n`)
   }
 }
 

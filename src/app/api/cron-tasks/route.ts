@@ -26,8 +26,8 @@ export async function POST(req: NextRequest) {
   const id = crypto.randomUUID()
 
   db.prepare(`
-    INSERT INTO cron_tasks (id, name, schedule, action, action_type, agent_name, skill_name, workspace_id, enabled, config)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO cron_tasks (id, name, schedule, action, action_type, agent_name, skill_name, workspace_id, model, enabled, config)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     body.name || 'New Task',
@@ -37,6 +37,7 @@ export async function POST(req: NextRequest) {
     body.agent_name || '',
     body.skill_name || '',
     body.workspace_id || '',
+    body.model || '',
     body.enabled !== undefined ? (body.enabled ? 1 : 0) : 1,
     typeof body.config === 'string' ? body.config : JSON.stringify(body.config || {})
   )

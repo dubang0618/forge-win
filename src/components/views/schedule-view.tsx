@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 import { useI18n } from '@/components/providers/i18n-provider'
 import { useCronTasks } from '@/hooks/use-cron-tasks'
 import { useTaskExecutions } from '@/hooks/use-task-executions'
+import { useModels } from '@/hooks/use-models'
 import type { CronTask, TaskActionType } from '@/lib/types'
 
 /* ─── Frequency → Cron helpers ─── */
@@ -166,9 +167,34 @@ export function ScheduleView({ workspaceId }: ScheduleViewProps) {
   const [showChecklist, setShowChecklist] = useState(false)
   const [engineRunning, setEngineRunning] = useState(false)
   const [engineLoading, setEngineLoading] = useState(false)
+  const { models } = useModels()
+  const [defaultModel, setDefaultModel] = useState('')
 
   useEffect(() => {
     fetch('/api/cron-engine').then(r => r.json()).then(d => setEngineRunning(d.running)).catch(() => {})
+    // Load default model from settings
+    fetch('/api/settings').then(r => r.json()).then(data => {
+      if (data.default_model) {
+        try {
+          setDefaultModel(JSON.parse(data.default_model))
+        } catch {
+          setDefaultModel(data.default_model)
+        }
+      }
+    }).catch(() => {})
+  }, [])
+
+  const handleDefaultModelChange = useCallback(async (modelId: string) => {
+    setDefaultModel(modelId)
+    try {
+      await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ default_model: modelId }),
+      })
+    } catch (err) {
+      console.error('Failed to update default model:', err)
+    }
   }, [])
 
   const toggleEngine = useCallback(async () => {
@@ -259,6 +285,24 @@ export function ScheduleView({ workspaceId }: ScheduleViewProps) {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-8 py-6 space-y-6">
+        {/* Default Settings */}
+        <div className="rounded-xl bg-surface border border-subtle p-5">
+          <h2 className="text-[15px] font-semibold text-primary mb-1">{t('schedule.defaultSettings')}</h2>
+          <p className="text-[12px] text-muted mb-4">{t('schedule.defaultSettingsDesc')}</p>
+          <div className="flex items-center gap-4">
+            <div className="w-[280px]">
+              <label className="text-[12px] font-medium text-secondary mb-1.5 block">{t('schedule.defaultModel')}</label>
+              <CustomSelect
+                value={defaultModel}
+                onChange={handleDefaultModelChange}
+                options={models.map(m => ({ value: m.id, label: m.label }))}
+                placeholder={t('schedule.selectModel')}
+                size="md"
+              />
+            </div>
+          </div>
+        </div>
+
         {/* Heartbeat Section */}
         {heartbeat && (
           <div className="rounded-xl bg-surface border border-subtle p-5">
@@ -626,12 +670,14 @@ function TaskFormModal({ mode, workspaceId, task, onSubmit, onClose }: {
   const [agentName, setAgentName] = useState(task?.agentName || '')
   const [skillName, setSkillName] = useState(task?.skillName || '')
   const [notifyChannel, setNotifyChannel] = useState(task?.config.notify_channel || 'none')
+  const [model, setModel] = useState(task?.model || '')
   const [description, setDescription] = useState(task?.action || '')
   const [submitting, setSubmitting] = useState(false)
 
   // Fetch available agents for this workspace
   const [agents, setAgents] = useState<SelectOption[]>([])
   const [skills, setSkills] = useState<SelectOption[]>([])
+  const { models } = useModels()
 
   const FREQ_OPTIONS: SelectOption[] = [
     { value: 'once', label: t('schedule.frequency.once') },
@@ -698,6 +744,7 @@ function TaskFormModal({ mode, workspaceId, task, onSubmit, onClose }: {
         agent_name: actionType === 'run-agent' ? agentName.replace(/^global:/, '') : '',
         skill_name: actionType === 'run-skill' ? skillName.replace(/^(workspace|global):/, '') : '',
         workspace_id: workspaceId,
+        model,
         config: {
           notify_channel: notifyChannel === 'none' ? '' : notifyChannel,
           description,
@@ -850,6 +897,23 @@ function TaskFormModal({ mode, workspaceId, task, onSubmit, onClose }: {
                 { value: 'feishu', label: 'Feishu' },
                 { value: 'discord', label: 'Discord' },
               ]}
+              size="md"
+            />
+          </div>
+
+          {/* Model Selector */}
+          <div>
+            <label className="block text-[13px] text-secondary mb-1.5 font-medium">
+              {t('form.model')} <span className="text-muted font-normal text-[12px]">({t('form.optional')})</span>
+            </label>
+            <CustomSelect
+              value={model}
+              onChange={setModel}
+              options={[
+                { value: '', label: t('schedule.useDefaultModel') },
+                ...models.map(m => ({ value: m.id, label: m.label }))
+              ]}
+              placeholder={t('schedule.useDefaultModel')}
               size="md"
             />
           </div>

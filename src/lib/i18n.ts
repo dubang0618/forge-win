@@ -441,6 +441,11 @@ const translations: Record<Locale, Record<string, string>> = {
 
     // Schedule notify options
     'schedule.notifyNone': '无',
+    'schedule.useDefaultModel': '使用默认模型',
+    'schedule.defaultSettings': '默认设置',
+    'schedule.defaultSettingsDesc': '定时任务的默认配置。未指定模型的任务将使用此默认模型。',
+    'schedule.defaultModel': '默认模型',
+    'schedule.selectModel': '选择模型',
 
     // Schedule time labels
     'schedule.everyNMin': '每 {n} 分钟',
@@ -991,6 +996,11 @@ const translations: Record<Locale, Record<string, string>> = {
 
     // Schedule notify options
     'schedule.notifyNone': 'None',
+    'schedule.useDefaultModel': 'Use Default Model',
+    'schedule.defaultSettings': 'Default Settings',
+    'schedule.defaultSettingsDesc': 'Default configuration for scheduled tasks. Tasks without a specified model will use this default.',
+    'schedule.defaultModel': 'Default Model',
+    'schedule.selectModel': 'Select Model',
 
     // Schedule time labels
     'schedule.everyNMin': 'Every {n} min',

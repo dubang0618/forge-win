@@ -177,6 +177,7 @@ export interface CronTaskRow {
   enabled: number
   is_heartbeat: number
   config: string
+  model: string
   last_run_at: string | null
   last_run_result: string | null
   created_at: string
@@ -195,6 +196,7 @@ export interface CronTask {
   enabled: boolean
   isHeartbeat: boolean
   config: Record<string, string>
+  model: string
   lastRunAt: string | null
   lastRunResult: string | null
   createdAt: string

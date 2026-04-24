@@ -21,7 +21,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const allowedFields = [
     'name', 'schedule', 'action', 'action_type', 'agent_name', 'skill_name',
-    'workspace_id', 'enabled', 'config', 'last_run_at', 'last_run_result',
+    'workspace_id', 'model', 'enabled', 'config', 'last_run_at', 'last_run_result',
   ]
   const sets: string[] = []
   const values: unknown[] = []

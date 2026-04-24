@@ -420,6 +420,15 @@ export function createForgeQuery(opts: ForgeQueryOptions): Query {
   // Resolve API key (supports both API key and CLI auth modes)
   const resolved = resolveProvider(opts.model)
 
+  // Debug logging
+  const fs = require('fs')
+  const path = require('path')
+  const os = require('os')
+  const logPath = path.join(os.homedir(), '.forge', 'cron-debug.log')
+  fs.appendFileSync(logPath, `[${new Date().toISOString()}] SDK createForgeQuery - input model: ${opts.model}\n`)
+  fs.appendFileSync(logPath, `[${new Date().toISOString()}] SDK resolveProvider result: ${JSON.stringify(resolved)}\n`)
+  fs.appendFileSync(logPath, `[${new Date().toISOString()}] SDK skipMcpServers: ${opts.skipMcpServers}\n`)
+
   // Build system prompt
   // IM queries use a compact base prompt but still load workspace context + memory
   // to maintain consistent personality, user info, and memory across desktop and IM

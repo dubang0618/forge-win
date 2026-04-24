@@ -12,6 +12,7 @@ interface DbCronTask {
   agent_name: string
   skill_name: string
   workspace_id: string
+  model: string
   enabled: number
   is_heartbeat: number
   config: string
@@ -34,6 +35,7 @@ function mapTask(row: DbCronTask): CronTask {
     agentName: row.agent_name || '',
     skillName: row.skill_name || '',
     workspaceId: row.workspace_id || '',
+    model: row.model || '',
     enabled: row.enabled === 1,
     isHeartbeat: row.is_heartbeat === 1,
     config,
@@ -73,6 +75,7 @@ export function useCronTasks(workspaceId?: string) {
     agent_name?: string
     skill_name?: string
     workspace_id?: string
+    model?: string
     config?: Record<string, string>
   }) => {
     const res = await fetch('/api/cron-tasks', {

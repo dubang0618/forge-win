@@ -370,7 +370,7 @@ export function getDb(): Database.Database {
     }
   }
 
-  // Migrate cron_tasks: add workspace_id, action_type, agent_name, skill_name columns
+  // Migrate cron_tasks: add workspace_id, action_type, agent_name, skill_name, model columns
   const cronCols = db.prepare("PRAGMA table_info(cron_tasks)").all() as { name: string }[]
   const cronColNames = cronCols.map(c => c.name)
   if (!cronColNames.includes('workspace_id')) {
@@ -384,6 +384,9 @@ export function getDb(): Database.Database {
   }
   if (!cronColNames.includes('skill_name')) {
     db.exec("ALTER TABLE cron_tasks ADD COLUMN skill_name TEXT NOT NULL DEFAULT ''")
+  }
+  if (!cronColNames.includes('model')) {
+    db.exec("ALTER TABLE cron_tasks ADD COLUMN model TEXT NOT NULL DEFAULT ''")
   }
 
   // Migrate task_executions: add session_id column
