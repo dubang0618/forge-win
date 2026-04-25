@@ -273,25 +273,38 @@ Skills, Agents, and MCP tools also appear in the autocomplete dropdown, grouped 
 
 | Platform | Format | Architecture |
 |---|---|---|
-| macOS | .dmg | arm64 (Apple Silicon) |
+| Windows | .exe (NSIS Installer) | x64 |
 
-Download from the [Releases](https://github.com/feicaiclub/forge/releases/latest) page.
+Download from the [Releases](https://github.com/dubang0618/forge-win/releases/latest) page.
 
-> Intel Mac users: build from source with `pnpm package`.
+### Windows Installation Steps
+
+1. Download `Forge Setup 1.0.4.exe` from Releases
+2. Run the installer
+3. Choose installation directory (default: `C:\Program Files\Forge`)
+4. Complete installation wizard
+5. Launch Forge from Start Menu or Desktop shortcut
 
 <details>
-<summary>macOS: Gatekeeper warning on first launch</summary>
+<summary>Windows: SmartScreen warning on first launch</summary>
 
-The app is ad-hoc signed (not notarized). On first launch:
+The app is self-signed. If you see "Windows protected your PC":
 
-**Option 1** — Right-click `Forge.app` in Finder > Open > confirm.
+**Option 1** — Click "More info" → "Run anyway"
 
-**Option 2** — System Settings > Privacy & Security > scroll to Security > click Open Anyway.
+**Option 2** — Right-click the installer → Properties → check "Unblock" → Apply → OK, then run
 
-**Option 3** — Run in Terminal:
-```bash
-xattr -cr /Applications/Forge.app
-```
+</details>
+
+<details>
+<summary>Auto-update feature</summary>
+
+Starting from v1.0.4, Forge supports automatic updates:
+- App checks for updates on startup
+- Download notification appears when new version is available
+- Click "Download" to update in background
+- Restart app to complete installation
+
 </details>
 
 ---
