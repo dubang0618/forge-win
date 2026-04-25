@@ -60,11 +60,11 @@ def read_clipboard_files() -> list[str]:
 def main() -> int:
     try:
         paths = read_clipboard_files()
-        # Force UTF-8 output with BOM to ensure proper encoding
-        import codecs
-        sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
-        sys.stdout.write(json.dumps(paths, ensure_ascii=False))
-        sys.stdout.flush()
+        # Use ensure_ascii=True to avoid encoding issues with PyInstaller exe
+        output = json.dumps(paths, ensure_ascii=True)
+        # Write to stdout with explicit UTF-8 encoding
+        sys.stdout.buffer.write(output.encode('utf-8'))
+        sys.stdout.buffer.flush()
         return 0
     except Exception as exc:
         sys.stderr.write(str(exc))

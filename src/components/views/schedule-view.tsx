@@ -463,9 +463,9 @@ export function ScheduleView({ workspaceId }: ScheduleViewProps) {
                 value={typeFilter}
                 onChange={setTypeFilter}
                 options={[
-                  { value: 'all', label: 'All Types' },
-                  { value: 'heartbeat', label: 'Heartbeat' },
-                  { value: 'cron', label: 'Cron Tasks' },
+                  { value: 'all', label: t('schedule.filter.allTypes') },
+                  { value: 'heartbeat', label: t('schedule.filter.heartbeat') },
+                  { value: 'cron', label: t('schedule.filter.cronTasks') },
                 ]}
                 size="sm"
               />
@@ -473,10 +473,10 @@ export function ScheduleView({ workspaceId }: ScheduleViewProps) {
                 value={statusFilter}
                 onChange={setStatusFilter}
                 options={[
-                  { value: 'all', label: 'All Status' },
-                  { value: 'ok', label: '✓ OK' },
-                  { value: 'alert', label: '⚠ Alert' },
-                  { value: 'error', label: '✗ Error' },
+                  { value: 'all', label: t('schedule.filter.allStatus') },
+                  { value: 'ok', label: t('schedule.filter.ok') },
+                  { value: 'alert', label: t('schedule.filter.alert') },
+                  { value: 'error', label: t('schedule.filter.error') },
                 ]}
                 size="sm"
               />
@@ -488,7 +488,30 @@ export function ScheduleView({ workspaceId }: ScheduleViewProps) {
                 <div key={exec.id} className="flex items-center justify-between px-2 py-1.5 rounded hover:bg-surface-hover transition-colors">
                   <div className="flex items-center gap-3">
                     <span className="text-[11px] text-muted font-mono w-[120px] shrink-0">
-                      {exec.executedAt?.slice(5, 16).replace('T', ' ') || ''}
+                      {exec.executedAt ? (() => {
+                        try {
+                          // SQLite datetime('now') returns 'YYYY-MM-DD HH:MM:SS' in UTC
+                          // Add 'Z' suffix if not present to indicate UTC
+                          let dateStr = exec.executedAt.trim()
+                          if (!dateStr.endsWith('Z') && !dateStr.includes('+') && !dateStr.includes('T')) {
+                            // SQLite format: convert space to 'T' and add 'Z'
+                            dateStr = dateStr.replace(' ', 'T') + 'Z'
+                          } else if (!dateStr.endsWith('Z') && dateStr.includes('T')) {
+                            dateStr = dateStr + 'Z'
+                          }
+                          const date = new Date(dateStr)
+                          if (isNaN(date.getTime())) return ''
+                          return date.toLocaleString('zh-CN', {
+                            month: '2-digit',
+                            day: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            hour12: false
+                          }).replace(/\//g, '-').replace(',', '')
+                        } catch {
+                          return ''
+                        }
+                      })() : ''}
                     </span>
                     <span className="text-[12px] text-secondary w-[120px] shrink-0">{exec.taskName}</span>
                     <span className={cn('text-[12px]',
@@ -537,6 +560,7 @@ export function ScheduleView({ workspaceId }: ScheduleViewProps) {
         <TaskFormModal
           mode="create"
           workspaceId={workspaceId}
+          defaultModel={defaultModel}
           onSubmit={async (opts) => { await handleCreateTask(opts); }}
           onClose={() => setShowNewForm(false)}
         />
@@ -548,6 +572,7 @@ export function ScheduleView({ workspaceId }: ScheduleViewProps) {
           mode="edit"
           workspaceId={workspaceId}
           task={editingTask}
+          defaultModel={defaultModel}
           onSubmit={async (opts) => { await handleEditTask(editingTask.id, opts); }}
           onClose={() => setEditingTask(null)}
         />
@@ -647,10 +672,11 @@ function cronToSchedule(cron: string): VisualSchedule {
 
 /* ─── Task Form Modal (Create + Edit) ─── */
 
-function TaskFormModal({ mode, workspaceId, task, onSubmit, onClose }: {
+function TaskFormModal({ mode, workspaceId, task, defaultModel, onSubmit, onClose }: {
   mode: 'create' | 'edit'
   workspaceId: string
   task?: CronTask
+  defaultModel?: string
   onSubmit: (opts: {
     name: string
     schedule?: string
@@ -659,6 +685,7 @@ function TaskFormModal({ mode, workspaceId, task, onSubmit, onClose }: {
     agent_name?: string
     skill_name?: string
     workspace_id?: string
+    model?: string
     config?: Record<string, string>
   }) => Promise<void>
   onClose: () => void
@@ -744,7 +771,7 @@ function TaskFormModal({ mode, workspaceId, task, onSubmit, onClose }: {
         agent_name: actionType === 'run-agent' ? agentName.replace(/^global:/, '') : '',
         skill_name: actionType === 'run-skill' ? skillName.replace(/^(workspace|global):/, '') : '',
         workspace_id: workspaceId,
-        model,
+        model: model || defaultModel,
         config: {
           notify_channel: notifyChannel === 'none' ? '' : notifyChannel,
           description,

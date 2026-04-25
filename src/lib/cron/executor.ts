@@ -10,6 +10,7 @@ import { readWorkspaceFile } from '@/lib/workspace-fs'
 import { getBridgeManager } from '@/lib/im/bridge-manager'
 import { emitImEvent } from '@/lib/im/im-events'
 import type { CronTaskRow } from '@/lib/types'
+import { resolveProvider } from '@/lib/provider'
 
 interface TaskConfig {
   check_interval?: string
@@ -86,19 +87,20 @@ async function executeHeartbeat(task: CronTaskRow): Promise<TaskResult> {
   }
 
   const systemPrompt = [
-    'You are a heartbeat agent performing routine checks.',
-    'Execute each item in the checklist below using the available tools.',
-    'After checking all items, summarize your findings.',
-    'If everything is normal, respond with exactly: HEARTBEAT_OK',
-    'If you find issues or items that need attention, list them clearly.',
-    'Be concise — your output will be automatically delivered via IM notification.',
-    'Do NOT try to send messages yourself or ask for API credentials.',
+    '你是一个心跳检测代理,负责执行日常检查。',
+    '**重要:请全程使用中文回复。**',
+    '使用可用的工具执行下面清单中的每一项。',
+    '检查完所有项目后,总结你的发现。',
+    '如果一切正常,请准确回复: HEARTBEAT_OK',
+    '如果发现问题或需要注意的事项,请清楚地列出来。',
+    '请简洁 — 你的输出将通过 IM 通知自动发送。',
+    '不要尝试自己发送消息或询问 API 凭证。',
   ].join('\n')
 
-  const userMessage = `Run the following heartbeat checklist:\n\n${checklist}`
+  const userMessage = `执行以下心跳检查清单:\n\n${checklist}`
   const sessionTitle = `[Scheduled] ${task.name}`
 
-  const { text, sessionId } = await runAgentTask(systemPrompt, userMessage, workspaceId, sessionTitle, task.model)
+  const { text, sessionId } = await runAgentTask(systemPrompt, userMessage, workspaceId, sessionTitle, task.model, true)
 
   const isOk = text.includes('HEARTBEAT_OK')
   const status = isOk ? 'ok' : 'alert'
@@ -236,9 +238,25 @@ async function runAgentTask(
   workspaceId: string,
   sessionTitle: string,
   taskModel?: string,
+  reuseSession?: boolean,
 ): Promise<{ text: string; sessionId: string }> {
   const db = getDb()
+
+  // For heartbeat tasks, find existing session to append messages to
+  let targetSessionId: string | undefined
+  if (reuseSession) {
+    const existing = db.prepare(
+      "SELECT id FROM sessions WHERE title = ? AND workspace = ? ORDER BY created_at DESC LIMIT 1"
+    ).get(sessionTitle, workspaceId) as { id: string } | undefined
+    targetSessionId = existing?.id
+  }
+
+  // SDK always needs a fresh session ID
   const sessionId = crypto.randomUUID()
+
+  // Debug logging
+  const fs = require('fs')
+  const logPath = require('path').join(require('os').homedir(), '.forge', 'cron-debug.log')
 
   // Priority: task.model > default_model setting > fallback
   let model = 'claude-sonnet-4-6'
@@ -267,19 +285,20 @@ async function runAgentTask(
     "INSERT INTO messages (id, session_id, role, content, created_at) VALUES (?, ?, 'user', ?, datetime('now'))"
   ).run(userMsgId, sessionId, JSON.stringify([{ type: 'text', text: userMessage }]))
 
-  // Debug logging to file
-  const fs = require('fs')
-  const logPath = require('path').join(require('os').homedir(), '.forge', 'cron-debug.log')
-  fs.appendFileSync(logPath, `\n[${new Date().toISOString()}] Cron Executor - Model: ${model}\n`)
+  // Resolve provider type for SDK
+  const resolved = resolveProvider(model)
+  const providerType = resolved.provider
 
   const q = createForgeQuery({
     prompt: userMessage,
     sessionId,
     model,
     workspaceId,
-    bypassPermissions: true,
     customSystemPrompt: systemPrompt,
     skipMcpServers: true,
+    skipAgents: true,
+    bypassPermissions: true,
+    providerType,
   })
 
   const allTextBlocks: string[] = []
@@ -296,14 +315,22 @@ async function runAgentTask(
 
   // Store the assistant response
   const assistantMsgId = crypto.randomUUID()
+  const finalSessionId = targetSessionId || sessionId
   db.prepare(
     "INSERT INTO messages (id, session_id, role, content, created_at) VALUES (?, ?, 'assistant', ?, datetime('now'))"
-  ).run(assistantMsgId, sessionId, JSON.stringify([{ type: 'text', text: resultText }]))
+  ).run(assistantMsgId, finalSessionId, JSON.stringify([{ type: 'text', text: resultText }]))
+
+  // If reusing session, delete the temporary SDK session and update the target session timestamp
+  if (targetSessionId) {
+    db.prepare("DELETE FROM sessions WHERE id = ?").run(sessionId)
+    db.prepare("DELETE FROM messages WHERE session_id = ?").run(sessionId)
+    db.prepare("UPDATE sessions SET updated_at = datetime('now') WHERE id = ?").run(targetSessionId)
+  }
 
   // Notify desktop UI to refresh session list via SSE
-  emitImEvent('im:session-changed', { sessionId, workspaceId })
+  emitImEvent('im:session-changed', { sessionId: finalSessionId, workspaceId })
 
-  return { text: resultText, sessionId }
+  return { text: resultText, sessionId: finalSessionId }
 }
 
 /**

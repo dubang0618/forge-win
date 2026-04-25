@@ -110,5 +110,9 @@
     ],
     "category": "Development",
     "icon": "build/icons"
+  },
+  "publish": {
+    "provider": "generic",
+    "url": "https://gitee.com/你的用户名/forge/releases/download/${version}"
   }
 }

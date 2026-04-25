@@ -15,11 +15,28 @@ declare const globalThis: {
 
 class CronEngine {
   private timer: ReturnType<typeof setInterval> | null = null
+  private alignTimeout: ReturnType<typeof setTimeout> | null = null
   private running = false
   private executingTasks = new Set<string>()
 
   start(): void {
-    if (this.running) return
+    if (this.running) {
+      console.log('[CronEngine] Already running, ignoring start() call')
+      return
+    }
+
+    // Clear any existing timers
+    if (this.timer) {
+      console.log('[CronEngine] Clearing existing interval timer')
+      clearInterval(this.timer)
+      this.timer = null
+    }
+    if (this.alignTimeout) {
+      console.log('[CronEngine] Clearing existing alignment timeout')
+      clearTimeout(this.alignTimeout)
+      this.alignTimeout = null
+    }
+
     this.running = true
     console.log('[CronEngine] Started')
 
@@ -31,7 +48,7 @@ class CronEngine {
     console.log(`[CronEngine] Aligning to next minute in ${secondsUntilNextMinute}s (${msUntilNextMinute}ms)`)
 
     // Wait until the next whole minute, then start checking every 60 seconds
-    setTimeout(() => {
+    this.alignTimeout = setTimeout(() => {
       if (!this.running) return
       console.log('[CronEngine] Aligned to minute boundary, starting periodic checks')
       this.tick()
@@ -44,6 +61,10 @@ class CronEngine {
     if (this.timer) {
       clearInterval(this.timer)
       this.timer = null
+    }
+    if (this.alignTimeout) {
+      clearTimeout(this.alignTimeout)
+      this.alignTimeout = null
     }
     console.log('[CronEngine] Stopped')
   }

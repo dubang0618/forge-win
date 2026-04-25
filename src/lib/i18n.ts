@@ -454,6 +454,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'schedule.day': '日 {dom} {time}',
     'schedule.never': '从未',
 
+    // Schedule filters
+    'schedule.filter.allTypes': '所有类型',
+    'schedule.filter.allStatus': '所有状态',
+    'schedule.filter.heartbeat': '心跳',
+    'schedule.filter.cronTasks': 'Cron 任务',
+    'schedule.filter.ok': '✓ 成功',
+    'schedule.filter.alert': '⚠ 警告',
+    'schedule.filter.error': '✗ 错误',
+
     // IM view
     'im.overview': '概览',
     'im.bridgeTitle': 'IM Bridge',
@@ -1008,6 +1017,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'schedule.everyDay': 'Every day {time}',
     'schedule.day': 'Day {dom} {time}',
     'schedule.never': 'Never',
+
+    // Schedule filters
+    'schedule.filter.allTypes': 'All Types',
+    'schedule.filter.allStatus': 'All Status',
+    'schedule.filter.heartbeat': 'Heartbeat',
+    'schedule.filter.cronTasks': 'Cron Tasks',
+    'schedule.filter.ok': '✓ OK',
+    'schedule.filter.alert': '⚠ Alert',
+    'schedule.filter.error': '✗ Error',
 
     // IM view
     'im.overview': 'Overview',

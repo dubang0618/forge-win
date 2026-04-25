@@ -1,4 +1,5 @@
 import { app, BrowserWindow, shell, ipcMain, dialog, clipboard, Menu } from 'electron'
+import { autoUpdater } from 'electron-updater'
 import path from 'node:path'
 import os from 'node:os'
 import { createServer } from 'node:net'
@@ -6,6 +7,11 @@ import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
 import { existsSync, readdirSync, statSync, watch, type FSWatcher } from 'node:fs'
 
 const isDev = !app.isPackaged
+
+// Use different app name for dev mode to separate data directories
+if (isDev) {
+  app.setName('Forge Dev')
+}
 
 let mainWindow: BrowserWindow | null = null
 let serverUrl: string | null = null  // Module-level for activate handler
@@ -90,9 +96,11 @@ function readWindowsClipboardFilesFromHelper() {
       console.log('[clipboard:readFiles][win32] using exe:', helperPath)
       raw = execFileSync(helperPath, [], {
         encoding: 'utf8',
-        timeout: 3000,
-        windowsHide: !isDev,  // Show terminal in dev mode for debugging
+        timeout: 5000,
+        windowsHide: false,  // Don't hide window to avoid output truncation
+        maxBuffer: 10 * 1024 * 1024,  // 10MB buffer
       })
+      console.log('[clipboard:readFiles][win32] exe raw output:', { length: raw.length, preview: raw.slice(0, 500) })
     }
 
     const parsed = JSON.parse(raw)
@@ -379,6 +387,34 @@ function createWindow(url: string) {
 
 app.whenReady().then(async () => {
   createAppMenu()
+
+  // Setup auto-updater (only in production)
+  if (!isDev) {
+    autoUpdater.checkForUpdatesAndNotify()
+
+    autoUpdater.on('update-available', () => {
+      console.log('[updater] Update available')
+    })
+
+    autoUpdater.on('update-downloaded', () => {
+      console.log('[updater] Update downloaded')
+      dialog.showMessageBox({
+        type: 'info',
+        title: '发现新版本',
+        message: '新版本已下载完成，是否立即重启更新？',
+        buttons: ['立即更新', '稍后'],
+        defaultId: 0,
+      }).then((result) => {
+        if (result.response === 0) {
+          autoUpdater.quitAndInstall()
+        }
+      })
+    })
+
+    autoUpdater.on('error', (err) => {
+      console.error('[updater] Error:', err)
+    })
+  }
 
   // Register IPC handlers
   ipcMain.handle('dialog:openDirectory', async () => {

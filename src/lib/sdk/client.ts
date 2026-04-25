@@ -420,14 +420,6 @@ export function createForgeQuery(opts: ForgeQueryOptions): Query {
   // Resolve API key (supports both API key and CLI auth modes)
   const resolved = resolveProvider(opts.model)
 
-  // Debug logging
-  const fs = require('fs')
-  const path = require('path')
-  const os = require('os')
-  const logPath = path.join(os.homedir(), '.forge', 'cron-debug.log')
-  fs.appendFileSync(logPath, `[${new Date().toISOString()}] SDK createForgeQuery - input model: ${opts.model}\n`)
-  fs.appendFileSync(logPath, `[${new Date().toISOString()}] SDK resolveProvider result: ${JSON.stringify(resolved)}\n`)
-  fs.appendFileSync(logPath, `[${new Date().toISOString()}] SDK skipMcpServers: ${opts.skipMcpServers}\n`)
 
   // Build system prompt
   // IM queries use a compact base prompt but still load workspace context + memory
@@ -467,8 +459,10 @@ export function createForgeQuery(opts: ForgeQueryOptions): Query {
   // NOTE: sessionId and resume are mutually exclusive in the SDK.
   // First message: set sessionId to persist the session.
   // Subsequent messages: set resume (without sessionId) to continue the conversation.
+  const apiModelId = getApiModelId(opts.model) || opts.model
+
   const sdkOptions: Options = {
-    model: getApiModelId(opts.model) || opts.model,
+    model: apiModelId,
     cwd: (() => { try { return getProjectPath(opts.workspaceId) } catch { return process.cwd() } })(),
     systemPrompt,
     env: sdkEnv,
@@ -477,7 +471,8 @@ export function createForgeQuery(opts: ForgeQueryOptions): Query {
       : { sessionId: opts.sessionId, persistSession: !opts.skipPersistSession }),
     includePartialMessages: true,
     agentProgressSummaries: true,
-    betas: ['context-1m-2025-08-07'],
+    // Only add betas for Anthropic provider (custom providers may not support it)
+    ...(resolved.provider === 'anthropic' ? { betas: ['context-1m-2025-08-07'] } : {}),
     // settingSources: load settings from ~/.claude/, <project>/.claude/, and ~/.claude/settings.local.json.
     // Auth is NOT loaded from these — API key is via env vars, OAuth via subprocess reading ~/.claude.json.
     // NOTE: Overridden to ['project'] in canUseTool branch below to prevent pre-approved
@@ -487,9 +482,12 @@ export function createForgeQuery(opts: ForgeQueryOptions): Query {
   }
 
   // Thinking configuration — map unified Off/Auto/Max to provider-specific params
-  const thinkingConfig = mapThinkingMode(opts.thinkingMode || 'auto', opts.providerType || 'anthropic')
-  if (thinkingConfig) {
-    sdkOptions.thinking = thinkingConfig.thinking
+  // Only add thinking for Anthropic provider (custom providers may not support it)
+  if (resolved.provider === 'anthropic') {
+    const thinkingConfig = mapThinkingMode(opts.thinkingMode || 'auto', opts.providerType || 'anthropic')
+    if (thinkingConfig) {
+      sdkOptions.thinking = thinkingConfig.thinking
+    }
   }
 
   // Agents (only if any exist)
