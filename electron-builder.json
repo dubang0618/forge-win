@@ -113,6 +113,6 @@
   },
   "publish": {
     "provider": "generic",
-    "url": "https://gitee.com/你的用户名/forge/releases/download/${version}"
+    "url": "https://gitee.com/dubang0618/forge-win/releases/download/v${version}"
   }
 }

@@ -1,0 +1,45 @@
+Forge (Windows Edition)
+Copyright 2026 dubang0618
+
+This product is based on Forge by FEICAI
+Original project: https://github.com/feicaiclub/forge
+Copyright 2026 FEICAI
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+---
+
+MODIFICATIONS IN THIS FORK:
+
+1. Windows Platform Support
+   - Adapted Electron build configuration for Windows
+   - Fixed Windows-specific path handling issues
+   - Added Windows installer packaging
+
+2. Chinese Localization Improvements
+   - Enhanced Chinese UI translations
+   - Fixed Chinese font rendering issues
+   - Improved Chinese input method compatibility
+
+3. Additional Features
+   - Heartbeat task session reuse mechanism
+   - Chinese output for system prompts
+   - Auto-update functionality using Gitee/GitHub Releases
+   - Bailian AI model integration
+
+4. Bug Fixes
+   - Fixed cron engine template string syntax errors
+   - Improved scheduled task execution logic
+   - Enhanced error handling and logging
+
+For a complete list of changes, see the git commit history.

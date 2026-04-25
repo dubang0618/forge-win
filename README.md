@@ -1,8 +1,12 @@
-# Forge
+# Forge (Windows Edition)
 **Local AI. Remote Control.** A desktop AI workstation powered by Claude Agent SDK.
 
+> **This is a Windows port based on [feicaiclub/forge](https://github.com/feicaiclub/forge)**  
+> Original project by FEICAI, licensed under Apache License 2.0.  
+> This fork adds Windows support, Chinese localization improvements, and additional features.
+
 [![GitHub release](https://img.shields.io/github/v/release/feicaiclub/forge)](https://github.com/feicaiclub/forge/releases)
-[![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)](https://github.com/feicaiclub/forge/releases)
+[![Platform](https://img.shields.io/badge/platform-Windows-blue)](https://github.com/dubang0618/forge-win/releases)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 [中文文档](./README_CN.md)
