@@ -13,7 +13,7 @@ interface TreeNode {
 // Directories to hide from the project tree (not useful for browsing)
 const HIDDEN_DIRS = new Set(['node_modules', '__pycache__', 'dist', 'build', 'out', '.next', '.nuxt'])
 
-function buildTree(dirPath: string, maxDepth = 4, depth = 0): TreeNode[] {
+function buildTree(dirPath: string, maxDepth = 8, depth = 0): TreeNode[] {
   if (depth >= maxDepth) return []
   if (!fs.existsSync(dirPath)) return []
 
@@ -55,7 +55,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       // Global mode: always safe — ~/.claude/ always exists
       ensureWorkspaceDir(id)
       const forgePath = getWorkspacePath(GLOBAL_WORKSPACE_ID)
-      const tree = buildTree(forgePath, 4)
+      const tree = buildTree(forgePath, 8)
       return NextResponse.json({ tree })
     }
 
